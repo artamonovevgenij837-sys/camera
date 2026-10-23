@@ -1,1098 +1,514 @@
-ds.Transparency = 0.5; ds.Parent = dot
-	addConnection(c.MouseEnter:Connect(function()
-		TweenService:Create(c, TweenInfo.new(0.2), {BackgroundTransparency = 0.3}):Play()
-		TweenService:Create(st, TweenInfo.new(0.2), {Transparency = 0.3}):Play()
-	end))
-	addConnection(c.MouseLeave:Connect(function()
-		TweenService:Create(c, TweenInfo.new(0.2), {BackgroundTransparency = 0.4}):Play()
-		TweenService:Create(st, TweenInfo.new(0.2), {Transparency = 0.6}):Play()
-	end))
-	addConnection(c.MouseButton1Click:Connect(function()
-		if ScriptUnloaded then return end
-		local is = c:GetAttribute("Active") == true
-		local ns = not is
-		c:SetAttribute("Active", ns)
-		if ns then
-			TweenService:Create(dot, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = Themes[State.CurrentTheme].Accent}):Play()
-			playSound(SFX.On)
-		else
-			TweenService:Create(dot, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = Color3.fromRGB(100,100,100)}):Play()
-			playSound(SFX.Off)
-		end
-		if lmb then lmb(ns) end
-	end))
-	addConnection(c.MouseButton2Click:Connect(function()
-		if ScriptUnloaded then return end
-		if rmb then rmb() end
-	end))
-	return c, dot
+-- Violet Visuals v4 — standalone LocalScript
+-- Place in a client-side executor or StarterPlayerScripts for your own Roblox experience.
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+pcall(function() if _G.VV_Cleanup then _G.VV_Cleanup() end end)
+local function restoreCharacter(ch)
+    if not ch then return end
+    for _,d in ipairs(ch:GetDescendants()) do
+        local v=d:GetAttribute("VV_Transparency")
+        if v~=nil then d.Transparency=v; d:SetAttribute("VV_Transparency",nil) end
+    end
+end
+restoreCharacter(player.Character)
+local oldGui=playerGui:FindFirstChild("VioletVisualsGUI")
+if oldGui then oldGui:Destroy() end
+for _,v in ipairs(workspace:GetChildren()) do
+    if v:IsA("Model") and v.Name:sub(1,3)=="VV_" then v:Destroy() end
 end
 
-local function syncVisualCards()
-	for k, d in pairs(visualCardRegistry) do
-		local a = State[k] == true
-		local col = a and Themes[State.CurrentTheme].Accent or Color3.fromRGB(100,100,100)
-		if d.dot and d.dot.Parent then d.dot.BackgroundColor3 = col end
-		if d.card and d.card.Parent then d.card:SetAttribute("Active", a) end
-	end
+local C={
+    bg=Color3.fromRGB(11,10,16),panel=Color3.fromRGB(20,18,28),field=Color3.fromRGB(28,25,38),
+    fieldHi=Color3.fromRGB(38,33,52),line=Color3.fromRGB(45,40,60),white=Color3.fromRGB(235,230,245),
+    muted=Color3.fromRGB(140,130,160),accent=Color3.fromRGB(150,110,255),
+    accent2=Color3.fromRGB(255,110,180),danger=Color3.fromRGB(240,90,110)
+}
+local function new(class,props,parent)
+    local o=Instance.new(class)
+    for k,v in pairs(props or {}) do pcall(function() o[k]=v end) end
+    o.Parent=parent
+    return o
+end
+local function corner(o,r) new("UICorner",{CornerRadius=UDim.new(0,r or 8)},o) end
+local function stroke(o,col,thick) new("UIStroke",{Color=col or C.line,Thickness=thick or 1},o) end
+local function grad(o,a,b,rot) return new("UIGradient",{Color=ColorSequence.new(a,b),Rotation=rot or 90},o) end
+local function label(parent,text,size,bold,color)
+    return new("TextLabel",{BackgroundTransparency=1,Text=text,Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham,
+        TextSize=size or 13,TextColor3=color or C.white,TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true},parent)
 end
 
--- [FIX 2/3] Forward declarations теперь через переменные
-local openSettings
-local refreshExplorer
-local applyTheme
-local applyThemeToUI
-local CFG = {}   -- [FIX 2] CFG объявлена заранее
+local S={bloom=false,color=false,rays=false,dof=false,blur=false,night=false,full=false,amb=false,
+    morph=nil,cosmetics={},item=nil,skyEnabled=false,skyChoice="Violet Night",skyStars=1800,skyMoon=true,
+    fogEnd=100000,fogChoice="Violet",atmDensity=0.3}
+local function effect(class,name,props)
+    local e=Lighting:FindFirstChild(name) or Instance.new(class)
+    e.Name=name; for k,v in pairs(props) do pcall(function() e[k]=v end) end
+    e.Enabled=false; e.Parent=Lighting; return e
+end
+local bloom=effect("BloomEffect","VV_Bloom",{Intensity=.8,Size=35,Threshold=1.2})
+local colorFx=effect("ColorCorrectionEffect","VV_Color",{Saturation=.2,Contrast=.12,TintColor=Color3.fromRGB(235,220,255)})
+local rays=effect("SunRaysEffect","VV_Rays",{Intensity=.12,Spread=.8})
+local dof=effect("DepthOfFieldEffect","VV_DOF",{FarIntensity=.15,FocusDistance=40,InFocusRadius=30,NearIntensity=.3})
+local blur=effect("BlurEffect","VV_Blur",{Size=6})
 
-local function createVisualCard(title, desc, key, onToggle, rmb)
-	local c, d = createCard(title, desc, UI.visuals, function(active)
-		State[key] = active
-		if onToggle then onToggle(active) end
-	end, rmb)
-	visualCardRegistry[key] = {card = c, dot = d}
-	return c
+local function findOriginal(class)
+    for _,v in ipairs(Lighting:GetChildren()) do
+        if v:IsA(class) and v.Name:sub(1,3)~="VV_" then return v end
+    end
+end
+local originalSky=findOriginal("Sky")
+local originalAtm=findOriginal("Atmosphere")
+local skyBackup=originalSky and originalSky:Clone()
+local atmBackup=originalAtm and originalAtm:Clone()
+local saved={clock=Lighting.ClockTime,ambient=Lighting.Ambient,outdoor=Lighting.OutdoorAmbient,
+    fog=Lighting.FogColor,fogEnd=Lighting.FogEnd,brightness=Lighting.Brightness,exposure=Lighting.ExposureCompensation}
+local skyPresets={
+ ["Violet Night"]={clock=0,ambient=Color3.fromRGB(72,48,116),out=Color3.fromRGB(95,72,145),fog=Color3.fromRGB(43,27,75),density=.3,haze=1.3,glare=.1,exposure=-.12},
+ ["Deep Space"]={clock=0,ambient=Color3.fromRGB(25,25,65),out=Color3.fromRGB(42,42,88),fog=Color3.fromRGB(9,9,29),density=.12,haze=.2,glare=0,exposure=-.3},
+ ["Sunset"]={clock=18.3,ambient=Color3.fromRGB(185,99,91),out=Color3.fromRGB(220,145,98),fog=Color3.fromRGB(236,130,104),density=.35,haze=2,glare=.4,exposure=.05},
+ ["Golden Hour"]={clock=17,ambient=Color3.fromRGB(185,150,98),out=Color3.fromRGB(255,192,123),fog=Color3.fromRGB(255,197,135),density=.27,haze=1.4,glare=.3,exposure=.1},
+ ["Arctic Blue"]={clock=12,ambient=Color3.fromRGB(128,171,205),out=Color3.fromRGB(170,210,245),fog=Color3.fromRGB(175,220,255),density=.38,haze=1.2,glare=.15,exposure=.08},
+ ["Pink Dream"]={clock=7,ambient=Color3.fromRGB(205,133,177),out=Color3.fromRGB(250,180,212),fog=Color3.fromRGB(255,171,210),density=.34,haze=1.6,glare=.15,exposure=.07},
+ ["Dark Red"]={clock=0,ambient=Color3.fromRGB(92,25,38),out=Color3.fromRGB(135,37,45),fog=Color3.fromRGB(70,10,22),density=.33,haze=1.2,glare=.05,exposure=-.15},
+ ["Emerald"]={clock=1,ambient=Color3.fromRGB(38,110,88),out=Color3.fromRGB(58,155,122),fog=Color3.fromRGB(18,73,62),density=.3,haze=1.4,glare=.08,exposure=-.08},
+ ["Cloudy Gray"]={clock=11,ambient=Color3.fromRGB(115,122,135),out=Color3.fromRGB(152,161,174),fog=Color3.fromRGB(160,165,178),density=.48,haze=2.5,glare=0,exposure=-.12},
+ ["Cyber Pink"]={clock=0,ambient=Color3.fromRGB(160,60,140),out=Color3.fromRGB(200,90,170),fog=Color3.fromRGB(70,20,80),density=.4,haze=1.8,glare=.2,exposure=-.05}}
+local skyOrder={"Violet Night","Deep Space","Sunset","Golden Hour","Arctic Blue","Pink Dream","Dark Red","Emerald","Cloudy Gray","Cyber Pink"}
+local function wipeWorld()
+    for _,v in ipairs(Lighting:GetChildren()) do if v.Name:sub(1,3)=="VV_" and v:IsA("Sky") or v.Name:sub(1,3)=="VV_" and v:IsA("Atmosphere") then v:Destroy() end end
+end
+local function restoreWorld()
+    wipeWorld()
+    if skyBackup then skyBackup:Clone().Parent=Lighting end
+    if atmBackup then atmBackup:Clone().Parent=Lighting end
+    Lighting.ClockTime=saved.clock; Lighting.Ambient=saved.ambient; Lighting.OutdoorAmbient=saved.outdoor
+    Lighting.FogColor=saved.fog; Lighting.FogEnd=S.fogEnd; Lighting.ExposureCompensation=saved.exposure
+    local atm=Lighting:FindFirstChildOfClass("Atmosphere")
+    if atm and atmBackup then atm.Density=atmBackup.Density end
+end
+local function applySky()
+    if not S.skyEnabled then restoreWorld(); return end
+    wipeWorld(); local p=skyPresets[S.skyChoice] or skyPresets["Violet Night"]
+    new("Sky",{Name="VV_Sky",StarCount=math.clamp(S.skyStars,0,5000),CelestialBodiesShown=S.skyMoon,
+        SunAngularSize=S.skyMoon and 11 or 0,MoonAngularSize=S.skyMoon and 11 or 0},Lighting)
+    new("Atmosphere",{Name="VV_Atm",Color=p.fog,Decay=p.ambient,Density=S.atmDensity,Haze=p.haze,Glare=p.glare,Offset=0},Lighting)
+    Lighting.ClockTime=p.clock; Lighting.Ambient=p.ambient; Lighting.OutdoorAmbient=p.out
+    Lighting.FogColor=p.fog; Lighting.FogEnd=S.fogEnd; Lighting.ExposureCompensation=p.exposure
 end
 
--- ================= SETTINGS WINDOWS =================
-local WINS = {}
-local function hideMain() UI.main.Visible = false end
-local function showMain() UI.main.Visible = true end
-
-local function setOverlay(active)
-	if active then
-		dimOverlay.Visible = true
-		dimOverlay.BackgroundTransparency = 1
-		TweenService:Create(dimOverlay, TweenInfo.new(0.3), {BackgroundTransparency = 0.6}):Play()
-	else
-		TweenService:Create(dimOverlay, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
-		task.delay(0.35, function()
-			if not State.OpenSettings and not State.MenuOpen then dimOverlay.Visible = false end
-		end)
-	end
+-- UI
+local gui=new("ScreenGui",{Name="VioletVisualsGUI",ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=100},playerGui)
+local toggleOpen=new("TextButton",{Visible=false,ZIndex=20,Size=UDim2.fromOffset(46,42),Position=UDim2.fromOffset(14,95),Text="◇",TextSize=27,Font=Enum.Font.GothamBold,TextColor3=C.accent,BackgroundColor3=C.panel},gui)
+corner(toggleOpen,10); stroke(toggleOpen)
+local main=new("Frame",{Size=UDim2.new(.94,0,.82,0),Position=UDim2.new(.03,0,.09,0),BackgroundColor3=C.bg,BorderSizePixel=0,ClipsDescendants=true},gui)
+corner(main,14); stroke(main,C.line,1); new("UISizeConstraint",{MaxSize=Vector2.new(1300,880),MinSize=Vector2.new(300,320)},main)
+-- Deliberately no UIGradient on the main menu frame.
+local function setOpen(v)
+    if v then main.Visible=true; toggleOpen.Visible=false; main.BackgroundTransparency=0
+    else main.Visible=false; toggleOpen.Visible=true end
+end
+local header=new("Frame",{Size=UDim2.new(1,0,0,68),BackgroundTransparency=1},main)
+local logo=label(header,"◇",28,true,C.accent); logo.Size=UDim2.fromOffset(35,42); logo.Position=UDim2.fromOffset(20,13)
+local brand=label(header,"VIOLET  VISUALS",15,true); brand.Size=UDim2.fromOffset(200,22); brand.Position=UDim2.fromOffset(56,14)
+local version=label(header,"v4 · client",10,false,C.muted); version.Size=UDim2.fromOffset(200,18); version.Position=UDim2.fromOffset(56,36)
+local tabs=new("ScrollingFrame",{Size=UDim2.new(1,-320,0,48),Position=UDim2.fromOffset(230,10),BackgroundTransparency=1,ScrollBarThickness=0,ScrollingDirection=Enum.ScrollingDirection.X,CanvasSize=UDim2.fromOffset(600,0)},header)
+new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,8),VerticalAlignment=Enum.VerticalAlignment.Center},tabs)
+local closeBtn=new("TextButton",{Size=UDim2.fromOffset(40,40),Position=UDim2.new(1,-56,0,14),BackgroundColor3=C.field,Text="✕",TextSize=16,Font=Enum.Font.GothamBold,TextColor3=C.muted,BorderSizePixel=0},header)
+corner(closeBtn,10); closeBtn.MouseButton1Click:Connect(function() setOpen(false) end)
+new("Frame",{Size=UDim2.new(1,0,0,1),Position=UDim2.fromOffset(0,68),BorderSizePixel=0,BackgroundColor3=C.line},main)
+local body=new("ScrollingFrame",{Size=UDim2.new(1,-24,1,-88),Position=UDim2.fromOffset(12,78),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=4,ScrollBarImageColor3=C.accent,ScrollingDirection=Enum.ScrollingDirection.X,CanvasSize=UDim2.fromOffset(1120,0)},main)
+local columns=new("Frame",{Size=UDim2.new(0,1120,1,-4),BackgroundTransparency=1},body)
+new("UIListLayout",{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,14)},columns)
+local function column()
+    local f=new("ScrollingFrame",{Size=UDim2.new(0,356,1,0),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=2,ScrollBarImageColor3=C.accent,CanvasSize=UDim2.new()},columns)
+    local l=new("UIListLayout",{Padding=UDim.new(0,12)},f)
+    l:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() f.CanvasSize=UDim2.fromOffset(0,l.AbsoluteContentSize.Y+12) end)
+    return f
+end
+local function card(col,titleText,height)
+    local f=new("Frame",{Size=UDim2.new(1,-6,0,height),BackgroundColor3=C.panel,BorderSizePixel=0},col); corner(f,11); stroke(f)
+    local t=label(f,titleText,16,true); t.Size=UDim2.new(1,-95,0,30); t.Position=UDim2.fromOffset(18,12); return f
+end
+local function line(par,text,y)
+    local t=label(par,text,13,true); t.Size=UDim2.new(1,-36,0,24); t.Position=UDim2.fromOffset(18,y); return t
+end
+local function switch(par,y,initial,cb)
+    local state=initial==true
+    local b=new("TextButton",{Size=UDim2.fromOffset(48,26),Position=UDim2.new(1,-66,0,y),BackgroundColor3=state and C.accent or C.field,Text="",AutoButtonColor=false,BorderSizePixel=0},par); corner(b,14)
+    local dot=new("Frame",{Size=UDim2.fromOffset(18,18),Position=UDim2.fromOffset(state and 26 or 4,4),BackgroundColor3=state and C.white or C.muted,BorderSizePixel=0},b); corner(dot,9)
+    b.MouseButton1Click:Connect(function() state=not state; b.BackgroundColor3=state and C.accent or C.field; dot.Position=UDim2.fromOffset(state and 26 or 4,4); if cb then cb(state) end end)
+    return b
+end
+local function action(par,text,y,cb,color)
+    local b=new("TextButton",{Size=UDim2.new(1,-36,0,38),Position=UDim2.fromOffset(18,y),BackgroundColor3=color or C.field,Text=text,Font=Enum.Font.GothamBold,TextSize=12,TextColor3=C.white,BorderSizePixel=0,AutoButtonColor=false},par)
+    corner(b,7); stroke(b); b.MouseEnter:Connect(function() if not color then b.BackgroundColor3=C.fieldHi end end); b.MouseLeave:Connect(function() b.BackgroundColor3=color or C.field end); b.MouseButton1Click:Connect(cb); return b
+end
+local function dropdown(par,titleText,items,y,cb,start)
+    line(par,titleText,y); local i=start or 1
+    local b=new("TextButton",{Size=UDim2.new(1,-36,0,35),Position=UDim2.fromOffset(18,y+28),BackgroundColor3=C.field,Text="▾   "..items[i],TextXAlignment=Enum.TextXAlignment.Left,TextColor3=C.white,TextSize=12,Font=Enum.Font.Gotham,BorderSizePixel=0},par); corner(b,6); stroke(b)
+    b.MouseButton1Click:Connect(function() i=i%#items+1; b.Text="▾   "..items[i]; if cb then cb(items[i],i) end end); return b
+end
+local function slider(par,titleText,y,minV,maxV,default,cb,step)
+    step=step or 1; line(par,titleText,y)
+    local val=label(par,tostring(default),12,false,C.muted); val.Size=UDim2.fromOffset(80,20); val.Position=UDim2.new(1,-96,0,y); val.TextXAlignment=Enum.TextXAlignment.Right
+    local bar=new("Frame",{Size=UDim2.new(1,-36,0,5),Position=UDim2.fromOffset(18,y+34),BackgroundColor3=C.field,BorderSizePixel=0},par); corner(bar,3)
+    local alpha=(default-minV)/(maxV-minV); local fill=new("Frame",{Size=UDim2.new(alpha,0,1,0),BackgroundColor3=C.accent,BorderSizePixel=0},bar); corner(fill,3); grad(fill,C.accent,C.accent2,0)
+    local dot=new("Frame",{Size=UDim2.fromOffset(13,13),Position=UDim2.new(alpha,-6,.5,-6),BackgroundColor3=C.white,BorderSizePixel=0},bar); corner(dot,7)
+    local dragging=false
+    local hit=new("TextButton",{Size=UDim2.new(1,0,0,28),Position=UDim2.new(0,0,.5,-14),BackgroundTransparency=1,Text="",Active=true},bar)
+    local function update(x)
+        local a=math.clamp((x-bar.AbsolutePosition.X)/math.max(bar.AbsoluteSize.X,1),0,1)
+        local n=minV+(maxV-minV)*a; n=math.floor(n/step+.5)*step; n=math.clamp(n,minV,maxV); a=(n-minV)/(maxV-minV)
+        fill.Size=UDim2.new(a,0,1,0); dot.Position=UDim2.new(a,-6,.5,-6); val.Text=tostring(n); if cb then cb(n) end
+    end
+    hit.MouseButton1Down:Connect(function(x) dragging=true; update(x) end)
+    UIS.InputChanged:Connect(function(i) if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then update(i.Position.X) elseif dragging and i.UserInputType==Enum.UserInputType.Touch then update(i.Position.X) end end)
+    UIS.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
 end
 
-local function closeAllSettings()
-	for _, w in pairs(WINS) do if w.frame then w.frame.Visible = false end end
-	State.OpenSettings = nil
-	showMain()
+-- Morph system
+local activeMorph,morphKind,followConn,hideConn,charConn
+local function hideCharacter(ch)
+    for _,d in ipairs(ch:GetDescendants()) do
+        if (d:IsA("BasePart") or d:IsA("Decal")) and d.Name~="HumanoidRootPart" and not d:FindFirstAncestorOfClass("Tool") and d:GetAttribute("VV_Transparency")==nil then
+            d:SetAttribute("VV_Transparency",d.Transparency); d.Transparency=1
+        end
+    end
+    if hideConn then hideConn:Disconnect() end
+    hideConn=ch.DescendantAdded:Connect(function(d)
+        if (d:IsA("BasePart") or d:IsA("Decal")) and d.Name~="HumanoidRootPart" and not d:FindFirstAncestorOfClass("Tool") and d:GetAttribute("VV_Transparency")==nil then d:SetAttribute("VV_Transparency",d.Transparency); d.Transparency=1 end
+    end)
+end
+local function part(parent,name,size,color,material,shape)
+    local p=new("Part",{Name=name,Size=size,Color=color,Material=material or Enum.Material.SmoothPlastic,Anchored=true,CanCollide=false,CanTouch=false,CanQuery=false,Massless=true},parent)
+    if shape then p.Shape=shape end; return p
+end
+local morphParts={}
+local function addMorphPart(m,name,size,offset,color,material,shape,kind,side)
+    local p=part(m,name,size,color,material,shape); morphParts[#morphParts+1]={p=p,cf=offset,k=kind,s=side or 1}; return p
+end
+local function buildMorph(kind)
+    if followConn then followConn:Disconnect(); followConn=nil end
+    if charConn then charConn:Disconnect(); charConn=nil end
+    if hideConn then hideConn:Disconnect(); hideConn=nil end
+    if activeMorph then activeMorph:Destroy(); activeMorph=nil end
+    restoreCharacter(player.Character); morphParts={}; morphKind=kind; _G.VV_MorphBase=nil; _G.VV_RightArmCF=nil
+    if not kind then return end
+    local m=new("Model",{Name="VV_"..kind}); activeMorph=m
+    local fur,robe,light=Color3.fromRGB(190,172,216),Color3.fromRGB(205,197,221),Color3.fromRGB(240,232,248)
+    if kind=="Fox" then fur=Color3.fromRGB(237,123,39); robe=fur; light=Color3.fromRGB(255,235,205)
+    elseif kind=="Cat" then fur=Color3.fromRGB(70,66,85); robe=fur; light=Color3.fromRGB(230,225,240)
+    elseif kind=="Wolf" then fur=Color3.fromRGB(120,120,135); robe=fur; light=Color3.fromRGB(220,220,230)
+    elseif kind=="Dragon" then fur=Color3.fromRGB(180,30,40); robe=Color3.fromRGB(100,15,25); light=Color3.fromRGB(255,200,60)
+    elseif kind=="Ghost" then fur=Color3.fromRGB(210,220,255); robe=Color3.fromRGB(200,210,255); light=Color3.fromRGB(240,245,255)
+    elseif kind=="Robot" then fur=Color3.fromRGB(150,155,170); robe=Color3.fromRGB(120,125,140); light=Color3.fromRGB(60,240,255)
+    elseif kind=="Ghoul" then fur=Color3.fromRGB(235,235,240); robe=Color3.fromRGB(28,25,32); light=Color3.fromRGB(235,230,240) end
+    local function b(n,size,x,y,z,col,mat,shape,k,s) return addMorphPart(m,n,size,CFrame.new(x,y,z),col or fur,mat,shape,k,s) end
+    if kind=="Ghoul" then
+        -- Human-like Kaneki-inspired ghoul: white hair, dark clothes, asymmetrical red eye and mask.
+        b("Coat torso",Vector3.new(1.65,2.15,.72),0,0,0,Color3.fromRGB(28,26,32))
+        b("Shirt",Vector3.new(.65,1.8,.76),0,.05,-.02,Color3.fromRGB(180,175,185))
+        b("Head",Vector3.new(1.25,1.45,1.05),0,1.8,-.05,Color3.fromRGB(225,205,190))
+        b("White hair cap",Vector3.new(1.42,.55,1.18),0,2.48,-.02,Color3.fromRGB(242,242,248))
+        for i=-2,2 do b("Hair fringe",Vector3.new(.25,.72,.2),i*.22,2.17,-.58,Color3.fromRGB(242,242,248)) end
+        b("Left eye",Vector3.new(.15,.18,.06),-.3,1.88,-.59,Color3.fromRGB(35,25,30))
+        b("Kagune eye",Vector3.new(.17,.2,.07),.3,1.88,-.6,Color3.fromRGB(230,20,38),Enum.Material.Neon)
+        b("Mask",Vector3.new(.72,.48,.13),.08,1.52,-.62,Color3.fromRGB(45,40,48))
+        for i=-2,2 do b("Mask teeth",Vector3.new(.08,.18,.06),.08+i*.12,1.49,-.7,Color3.fromRGB(235,230,220)) end
+        b("Collar",Vector3.new(1.15,.25,.82),0,.92,-.02,Color3.fromRGB(12,12,16))
+        for _,x in ipairs({-.98,.98}) do b("Coat sleeve",Vector3.new(.48,1.85,.55),x,-.05,0,Color3.fromRGB(28,26,32),nil,nil,"arm",x>0 and -1 or 1) end
+        for _,x in ipairs({-.48,.48}) do b("Trouser",Vector3.new(.58,1.25,.62),x,-1.65,0,Color3.fromRGB(22,21,27),nil,nil,"leg",x>0 and 1 or -1); b("Boot",Vector3.new(.6,.28,.9),x,-2.38,-.1,Color3.fromRGB(12,12,15),nil,nil,"leg",x>0 and 1 or -1) end
+    else
+        b("Body",Vector3.new(2.0,2.25,1),0,0,0,robe)
+        b("Head",Vector3.new(2.0,1.9,1.35),0,2.05,-.05,fur)
+        local earH=(kind=="Bunny") and 1.4 or ((kind=="Fox" or kind=="Cat" or kind=="Wolf") and 1.0 or .65)
+        if kind=="Bunny" or kind=="Fox" or kind=="Cat" or kind=="Wolf" then
+            for _,x in ipairs({-.58,.58}) do b("Ear",Vector3.new(.42,earH,.35),x,3.15+earH*.35,0,fur); b("Inner ear",Vector3.new(.2,earH*.55,.06),x,3.15+earH*.35,-.2,Color3.fromRGB(187,112,151)) end
+        end
+        local eye=kind=="Cat" and Color3.fromRGB(80,220,120) or kind=="Wolf" and Color3.fromRGB(220,40,50) or kind=="Dragon" and Color3.fromRGB(255,210,60) or kind=="Robot" and Color3.fromRGB(60,240,255) or Color3.fromRGB(25,15,25)
+        for _,x in ipairs({-.65,.65}) do b("Eye",Vector3.new(.22,.3,.08),x,2.15,-.72,eye,kind=="Robot" and Enum.Material.Neon or nil) end
+        b("Muzzle",Vector3.new(.8,.42,.15),0,1.55,-.75,light)
+        b("Nose",Vector3.new(.18,.13,.1),0,1.68,-.84,Color3.fromRGB(25,15,25))
+        if kind=="Fox" or kind=="Cat" or kind=="Wolf" then b("Tail",Vector3.new(.7,.7,1.7),.55,-.45,1.15,fur); b("Tail tip",Vector3.new(.65,.65,.5),.55,-.45,2.05,light) end
+        if kind=="Dragon" then for _,x in ipairs({-.5,.5}) do b("Horn",Vector3.new(.25,.8,.25),x,3.05,0,light) end end
+        if kind=="Ghost" then for _,r in ipairs(morphParts) do r.p.Transparency=.28 end end
+        if kind=="Robot" then b("Antenna",Vector3.new(.1,.8,.1),0,3.15,0,light,Enum.Material.Neon) end
+        for _,x in ipairs({-.98,.98}) do b("Arm",Vector3.new(.52,1.75,.7),x,-.1,0,robe,nil,nil,"arm",x>0 and -1 or 1); b("Hand",Vector3.new(.45,.4,.5),x,-1.1,-.02,light,nil,nil,"arm",x>0 and -1 or 1) end
+        for _,x in ipairs({-.48,.48}) do b("Leg",Vector3.new(.65,1.35,.7),x,-1.65,0,fur,nil,nil,"leg",x>0 and 1 or -1); b("Foot",Vector3.new(.7,.3,.9),x,-2.4,-.12,light,nil,nil,"leg",x>0 and 1 or -1) end
+    end
+    local rightArm
+    for _,r in ipairs(morphParts) do if r.p.Name=="Arm" or r.p.Name=="Coat sleeve" then if r.s==-1 then rightArm=r.p end end end
+    local startClock=os.clock()
+    local function step()
+        local ch=player.Character; local hum=ch and ch:FindFirstChildOfClass("Humanoid")
+        local root=ch and ch:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local drop=(hum and hum.RigType==Enum.HumanoidRigType.R15) and (hum.HipHeight+root.Size.Y/2) or 3
+        local vel=root.AssemblyLinearVelocity; local speed=math.clamp(Vector3.new(vel.X,0,vel.Z).Magnitude/14,0,1)
+        local swing=math.sin((os.clock()-startClock)*10)*.55*speed
+        local base=root.CFrame*CFrame.new(0,3.0-drop+math.abs(swing)*.12,0)
+        for _,r in ipairs(morphParts) do
+            local cf=r.cf
+            if r.k=="leg" then cf=CFrame.new(0,-1.15,0)*CFrame.Angles(swing*r.s,0,0)*CFrame.new(0,1.15,0)*cf
+            elseif r.k=="arm" then cf=CFrame.new(0,.75,0)*CFrame.Angles(swing*r.s,0,0)*CFrame.new(0,-.75,0)*cf end
+            r.p.CFrame=base*cf
+        end
+        _G.VV_MorphBase=base
+        if rightArm then _G.VV_RightArmCF=rightArm.CFrame end
+    end
+    m.Parent=workspace; step(); followConn=RunService.RenderStepped:Connect(step)
+    if player.Character then hideCharacter(player.Character) end
+    charConn=player.CharacterAdded:Connect(function(ch) task.wait(.15); if morphKind then hideCharacter(ch) end end)
 end
 
-local function createSettingsWindow(name, title, size)
-	local W = {}
-	W.frame = Instance.new("Frame")
-	W.frame.Name = name.."Settings"
-	W.frame.Size = UDim2.new(0, size.X, 0, size.Y)
-	W.frame.Position = UDim2.new(0.5, -size.X/2, 0.5, -size.Y/2)
-	W.frame.BackgroundColor3 = Themes[State.CurrentTheme].Bg
-	W.frame.BackgroundTransparency = 0.35
-	W.frame.BorderSizePixel = 0
-	W.frame.Visible = false
-	W.frame.ZIndex = 600
-	W.frame.Parent = screenGui
-	W.corner = Instance.new("UICorner"); W.corner.CornerRadius = UDim.new(0,10); W.corner.Parent = W.frame
-	W.stroke = Instance.new("UIStroke")
-	W.stroke.Color = Themes[State.CurrentTheme].Stroke
-	W.stroke.Transparency = 0.4; W.stroke.Parent = W.frame
-	local header = Instance.new("Frame")
-	header.Size = UDim2.new(1,0,0,45)
-	header.BackgroundTransparency = 1
-	header.ZIndex = 601; header.Parent = W.frame
-	local tl = Instance.new("TextLabel")
-	tl.Text = title; tl.Font = FONT_MAIN; tl.TextSize = 16
-	tl.TextColor3 = Themes[State.CurrentTheme].Text
-	tl.Size = UDim2.new(1,-60,1,0); tl.Position = UDim2.new(0,22,0,0)
-	tl.TextXAlignment = Enum.TextXAlignment.Left
-	tl.BackgroundTransparency = 1; tl.ZIndex = 602; tl.Parent = header
-	local cb = Instance.new("TextButton")
-	cb.Text = "X"; cb.Font = FONT_MAIN; cb.TextSize = 22
-	cb.TextColor3 = Themes[State.CurrentTheme].Text
-	cb.Size = UDim2.new(0,32,0,32); cb.Position = UDim2.new(1,-42,0.5,-16)
-	cb.BackgroundTransparency = 1; cb.ZIndex = 602; cb.Parent = header
-	addConnection(cb.MouseEnter:Connect(function()
-		TweenService:Create(cb, TweenInfo.new(0.2), {TextColor3 = STYLE.Red}):Play()
-	end))
-	addConnection(cb.MouseLeave:Connect(function()
-		TweenService:Create(cb, TweenInfo.new(0.2), {TextColor3 = Themes[State.CurrentTheme].Text}):Play()
-	end))
-	addConnection(cb.MouseButton1Click:Connect(function() closeAllSettings() end))
-	makeDraggable(W.frame, header)
-	WINS[name] = W
-	return W
+-- Cosmetics all update in the shared RenderStepped loop.
+local cosmeticRegistry={}
+local function getHeadBase()
+    if _G.VV_MorphBase then return _G.VV_MorphBase*CFrame.new(0,2.05,-.05) end
+    local ch=player.Character; local head=ch and ch:FindFirstChild("Head"); return head and head.CFrame or nil
+end
+local function getBackBase()
+    if _G.VV_MorphBase then return _G.VV_MorphBase*CFrame.new(0,0,.6) end
+    local ch=player.Character; local torso=ch and (ch:FindFirstChild("UpperTorso") or ch:FindFirstChild("Torso") or ch:FindFirstChild("HumanoidRootPart"))
+    return torso and torso.CFrame*CFrame.new(0,0,.6) or nil
+end
+local function kaguneCosmetic()
+    local model=new("Model",{Name="VV_Kagune"},workspace); local tendrils={}
+    local dark=Color3.fromRGB(75,5,15); local mid=Color3.fromRGB(135,8,24); local tip=Color3.fromRGB(255,25,42)
+    for i=1,4 do
+        local segs={}
+        for s=1,11 do
+            local width=math.max(.12,.55-(s-1)*.037)
+            local p=part(model,"RinkakuSegment",Vector3.new(width,width,width*1.12),s>=9 and tip or dark:Lerp(mid,s/11),s>=9 and Enum.Material.Neon or Enum.Material.SmoothPlastic,Enum.PartType.Ball)
+            segs[s]=p
+        end
+        tendrils[i]={parts=segs,side=(i%2==0) and 1 or -1,layer=(i<=2) and 1 or -1,phase=i*1.4}
+    end
+    local function update(t)
+        local base=getBackBase(); if not base then return end
+        for _,ten in ipairs(tendrils) do
+            local prev=base*CFrame.new(ten.side*.28,ten.layer*.12,0)
+            for s,p in ipairs(ten.parts) do
+                local u=s/#ten.parts
+                local side=ten.side*(.18+u*1.45)+math.sin(t*1.8+ten.phase+u*2)*(.04+u*.12)
+                local up=.12+u*(ten.layer==1 and 2.25 or 1.35)+math.sin(t*1.5+ten.phase+u*2)*u*.16
+                local back=-u*(ten.layer==1 and .65 or .25)
+                local pos=base:PointToWorldSpace(Vector3.new(side,up,back))
+                local prevPos=(s==1) and base:PointToWorldSpace(Vector3.new(ten.side*.25,0,0)) or ten.parts[s-1].Position
+                local delta=pos-prevPos; p.Size=Vector3.new(.54-u*.38,.54-u*.38,math.max(.18,delta.Magnitude*.95))
+                p.CFrame=CFrame.lookAt((pos+prevPos)/2,pos)*CFrame.Angles(math.rad(90),0,0)
+                if s>=9 then p.Color=Color3.fromRGB(255,math.floor(20+u*15),35) end
+            end
+        end
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+local function wingsCosmetic()
+    local model=new("Model",{Name="VV_Wings"},workspace); local parts={}
+    for side=-1,1,2 do for i=1,5 do local p=part(model,"Wing",Vector3.new(.3,.6+i*.3,1.6-i*.16),Color3.fromRGB(245,245,255)); parts[#parts+1]={p=p,side=side,i=i} end end
+    return {model=model,update=function(t) local base=getBackBase(); if not base then return end; for _,w in ipairs(parts) do w.p.CFrame=base*CFrame.new(w.side*(.65+w.i*.24),.35-w.i*.12,.45)*CFrame.Angles(math.rad(20),math.rad(w.side*(35+w.i*6))+math.sin(t*2+w.i)*.1,math.rad(w.side*-15)) end end,cleanup=function() model:Destroy() end}
+end
+local function haloCosmetic()
+    local model=new("Model",{Name="VV_Halo"},workspace); local ring=part(model,"Halo",Vector3.new(2,.15,2),Color3.fromRGB(255,240,140),Enum.Material.Neon,Enum.PartType.Cylinder)
+    return {model=model,update=function(t) local base=getHeadBase(); if base then ring.CFrame=base*CFrame.new(0,1.15+math.sin(t*2)*.08,0)*CFrame.Angles(0,0,math.rad(90)) end end,cleanup=function() model:Destroy() end}
+end
+local function hornsCosmetic()
+    local model=new("Model",{Name="VV_Horns"},workspace); local hs={}
+    local bone=Color3.fromRGB(235,225,200)
+    for _,side in ipairs({-1,1}) do
+        local function branch(name,size,offset,ang)
+            local p=part(model,name,size,bone,Enum.Material.SmoothPlastic); hs[#hs+1]={p=p,side=side,offset=offset,ang=ang}
+        end
+        branch("HornStem",Vector3.new(.22,1.0,.22),Vector3.new(side*.42,.35,0),CFrame.Angles(0,0,math.rad(-side*18)))
+        branch("HornOuterBranch",Vector3.new(.17,.72,.17),Vector3.new(side*.68,.78,0),CFrame.Angles(0,0,math.rad(-side*55)))
+        branch("HornInnerBranch",Vector3.new(.15,.58,.15),Vector3.new(side*.2,1.0,-.02),CFrame.Angles(0,0,math.rad(side*32)))
+        branch("HornTip",Vector3.new(.12,.48,.12),Vector3.new(side*.84,1.08,0),CFrame.Angles(0,0,math.rad(-side*28)))
+    end
+    return {model=model,update=function() local base=getHeadBase(); if not base then return end; for _,h in ipairs(hs) do h.p.CFrame=base*CFrame.new(h.offset)*h.ang end end,cleanup=function() model:Destroy() end}
+end
+local function hatCosmetic()
+    local model=new("Model",{Name="VV_Hat"},workspace); local black=Color3.fromRGB(12,12,16)
+    local brim=part(model,"Brim",Vector3.new(1.8,.12,1.8),black,Enum.Material.SmoothPlastic,Enum.PartType.Cylinder)
+    local crown=part(model,"Crown",Vector3.new(1.05,1.45,1.05),black,Enum.Material.SmoothPlastic,Enum.PartType.Cylinder)
+    local band=part(model,"RedBand",Vector3.new(1.08,.16,1.08),Color3.fromRGB(255,20,35),Enum.Material.Neon,Enum.PartType.Cylinder)
+    local function update()
+        local base=getHeadBase(); if not base then return end
+        local hat=base*CFrame.new(0,1.05,0)
+        brim.CFrame=hat*CFrame.Angles(0,0,math.rad(90)); crown.CFrame=hat*CFrame.new(0,.72,0)*CFrame.Angles(0,0,math.rad(90)); band.CFrame=hat*CFrame.new(0,.16,0)*CFrame.Angles(0,0,math.rad(90))
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+local cosmeticBuilders={Kagune=kaguneCosmetic,Wings=wingsCosmetic,Halo=haloCosmetic,Horns=hornsCosmetic,Hat=hatCosmetic}
+local cosmeticLabels={Kagune="Ринкаку · Tokyo Ghoul",Wings="Ангельские крылья",Halo="Нимб",Horns="Ветвистые рога",Hat="Цилиндр · красная лента"}
+local function toggleCosmetic(name,on)
+    if on then if cosmeticRegistry[name] then return end; local b=cosmeticBuilders[name]; if b then cosmeticRegistry[name]=b(); S.cosmetics[name]=true end
+    else local c=cosmeticRegistry[name]; if c then c.cleanup(); cosmeticRegistry[name]=nil end; S.cosmetics[name]=nil end
 end
 
-local function isPointIn(frame, x, y)
-	if not frame or not frame.Visible then return false end
-	local p, s = frame.AbsolutePosition, frame.AbsoluteSize
-	return x >= p.X and x <= p.X + s.X and y >= p.Y and y <= p.Y + s.Y
+-- Items: every item's local origin is the grip point, at the bottom of staff / sword handle.
+local itemRegistry
+local function buildItem(kind)
+    if itemRegistry then itemRegistry.model:Destroy(); itemRegistry=nil end
+    S.item=kind; if not kind then return end
+    local model=new("Model",{Name="VV_Item_"..kind},workspace); local parts={}
+    local function add(name,size,color,offset,mat,shape)
+        local p=part(model,name,size,color,mat,shape); parts[#parts+1]={p=p,offset=offset}; return p
+    end
+    if kind=="Sword" then
+        add("Grip",Vector3.new(.18,.7,.18),Color3.fromRGB(80,50,30),CFrame.new(0,.35,0))
+        add("Guard",Vector3.new(.9,.12,.25),Color3.fromRGB(190,170,60),CFrame.new(0,.76,0))
+        add("Blade",Vector3.new(.14,2.7,.1),Color3.fromRGB(220,225,235),CFrame.new(0,2.15,0),Enum.Material.Metal)
+        add("Tip",Vector3.new(.14,.35,.11),Color3.fromRGB(220,225,235),CFrame.new(0,3.65,0),Enum.Material.Metal)
+    elseif kind=="Staff" then
+        add("Pole",Vector3.new(.16,4.1,.16),Color3.fromRGB(90,60,35),CFrame.new(0,2.05,0))
+        add("Orb",Vector3.new(.55,.55,.55),Color3.fromRGB(150,110,255),CFrame.new(0,4.25,0),Enum.Material.Neon,Enum.PartType.Ball)
+        add("Orb2",Vector3.new(.3,.3,.3),Color3.fromRGB(255,255,255),CFrame.new(0,4.25,0),Enum.Material.Neon,Enum.PartType.Ball)
+    elseif kind=="Lantern" then
+        add("Body",Vector3.new(.6,.8,.6),Color3.fromRGB(40,35,50),CFrame.new(0,.65,0))
+        local glow=add("Glow",Vector3.new(.4,.55,.4),Color3.fromRGB(255,200,90),CFrame.new(0,.65,0),Enum.Material.Neon)
+        new("PointLight",{Brightness=2,Range=15,Color=Color3.fromRGB(255,200,90)},glow)
+        add("Top",Vector3.new(.7,.1,.7),Color3.fromRGB(60,55,75),CFrame.new(0,1.15,0))
+        add("Handle",Vector3.new(.1,.45,.1),Color3.fromRGB(60,55,75),CFrame.new(0,1.43,0))
+    elseif kind=="Wand" then
+        add("Stick",Vector3.new(.08,1.4,.08),Color3.fromRGB(40,30,20),CFrame.new(0,.7,0))
+        add("Star",Vector3.new(.5,.5,.2),Color3.fromRGB(255,220,90),CFrame.new(0,1.55,0),Enum.Material.Neon)
+    elseif kind=="Pistol" then
+        add("Grip",Vector3.new(.16,.55,.2),Color3.fromRGB(30,30,35),CFrame.new(0,.275,0))
+        add("Slide",Vector3.new(.2,.25,1.1),Color3.fromRGB(55,55,65),CFrame.new(0,.65,.4),Enum.Material.Metal)
+        add("Barrel",Vector3.new(.14,.14,.35),Color3.fromRGB(20,20,25),CFrame.new(0,.67,1.05),Enum.Material.Metal)
+    end
+    itemRegistry={model=model,parts=parts,kind=kind}
+end
+local function updateItem()
+    if not itemRegistry then return end
+    local gripCF
+    if morphKind then
+        gripCF=_G.VV_RightArmCF
+        if gripCF then gripCF=gripCF*CFrame.new(0,-.72,-.18)*CFrame.Angles(math.rad(-10),0,math.rad(90)) end
+    else
+        local ch=player.Character; local hand=ch and (ch:FindFirstChild("RightHand") or ch:FindFirstChild("Right Arm"))
+        if hand then
+            if hand.Name=="RightHand" then gripCF=hand.CFrame*CFrame.new(0,-.05,0)*CFrame.Angles(math.rad(-90),0,0)
+            else gripCF=hand.CFrame*CFrame.new(0,-.45,0)*CFrame.Angles(0,0,math.rad(90)) end
+        end
+    end
+    if not gripCF then return end
+    for _,d in ipairs(itemRegistry.parts) do d.p.Transparency=0; d.p.CFrame=gripCF*d.offset end
 end
 
-addConnection(UserInputService.InputBegan:Connect(function(input, gp)
-	if ScriptUnloaded or gp then return end
-	if input.UserInputType == Enum.UserInputType.MouseButton1 and State.OpenSettings then
-		local mp = UserInputService:GetMouseLocation()
-		local w = WINS[State.OpenSettings]
-		if w and w.frame and w.frame.Visible then
-			if not isPointIn(w.frame, mp.X, mp.Y) then closeAllSettings() end
-		end
-	end
-	if input.KeyCode == Enum.KeyCode.Escape and State.OpenSettings then closeAllSettings() end
-end))
-
--- Slider
-local function makeSlider(parent, label, minV, maxV, initV, yPos, cb)
-	local lbl = Instance.new("TextLabel")
-	lbl.Text = label; lbl.Font = FONT_TEXT; lbl.TextSize = 14
-	lbl.TextColor3 = Themes[State.CurrentTheme].Text
-	lbl.Size = UDim2.new(1,-40,0,22); lbl.Position = UDim2.new(0,22,0,yPos)
-	lbl.TextXAlignment = Enum.TextXAlignment.Left
-	lbl.BackgroundTransparency = 1; lbl.ZIndex = 602; lbl.Parent = parent
-	local valLbl = Instance.new("TextLabel")
-	valLbl.Text = string.format("%.2f", initV)
-	valLbl.Font = FONT_TEXT; valLbl.TextSize = 14
-	valLbl.TextColor3 = Themes[State.CurrentTheme].Text
-	valLbl.TextTransparency = 0.3
-	valLbl.Size = UDim2.new(0,60,0,22); valLbl.Position = UDim2.new(1,-85,0,yPos)
-	valLbl.TextXAlignment = Enum.TextXAlignment.Right
-	valLbl.BackgroundTransparency = 1; valLbl.ZIndex = 602; valLbl.Parent = parent
-	local bg = Instance.new("Frame")
-	bg.Size = UDim2.new(0.9,0,0,8); bg.Position = UDim2.new(0.05,0,0,yPos+28)
-	bg.BackgroundColor3 = Color3.fromRGB(100,100,100)
-	bg.BackgroundTransparency = 0.5
-	bg.BorderSizePixel = 0; bg.ZIndex = 602; bg.Parent = parent
-	local bgc = Instance.new("UICorner"); bgc.CornerRadius = UDim.new(1,0); bgc.Parent = bg
-	local fill = Instance.new("Frame")
-	local ratio = (initV - minV)/(maxV - minV)
-	fill.Size = UDim2.new(ratio,0,1,0)
-	fill.BackgroundColor3 = Themes[State.CurrentTheme].Accent
-	fill.BorderSizePixel = 0; fill.ZIndex = 603; fill.Parent = bg
-	local fc = Instance.new("UICorner"); fc.CornerRadius = UDim.new(1,0); fc.Parent = fill
-	local knob = Instance.new("Frame")
-	knob.Size = UDim2.new(0,18,0,18)
-	knob.Position = UDim2.new(ratio,-9,0.5,-9)
-	knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
-	knob.BorderSizePixel = 0; knob.ZIndex = 604; knob.Parent = bg
-	local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1,0); kc.Parent = knob
-	local ks = Instance.new("UIStroke"); ks.Color = Color3.fromRGB(0,0,0); ks.Transparency = 0.5; ks.Parent = knob
-	local dragging = false
-	local function update()
-		if ScriptUnloaded then return end
-		local mx = UserInputService:GetMouseLocation().X
-		local ax = bg.AbsolutePosition.X
-		local w = bg.AbsoluteSize.X
-		local r = math.clamp((mx - ax)/w, 0, 1)
-		fill.Size = UDim2.new(r,0,1,0)
-		knob.Position = UDim2.new(r,-9,0.5,-9)
-		local v = minV + (maxV - minV)*r
-		valLbl.Text = string.format("%.2f", v)
-		cb(v)
-	end
-	addConnection(bg.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true; update() end
-	end))
-	addConnection(UserInputService.InputChanged:Connect(function(input)
-		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then update() end
-	end))
-	addConnection(UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-	end))
+-- UI pages
+local tabButtons={}; local currentTab="Characters"; local skyExpanded=false
+local function clearColumns() for _,o in ipairs(columns:GetChildren()) do if o:IsA("GuiObject") then o:Destroy() end end end
+local build
+local function shadersTab(a,b,c)
+    local p=card(a,"Bloom",175); switch(p,13,S.bloom,function(v) S.bloom=v; bloom.Enabled=v end); slider(p,"Сила",60,0,100,40,function(v) bloom.Intensity=v/50 end)
+    local p2=card(a,"Color Correction",175); switch(p2,13,S.color,function(v) S.color=v; colorFx.Enabled=v end); slider(p2,"Насыщенность",60,0,100,50,function(v) colorFx.Saturation=(v-50)/100 end)
+    local q=card(b,"Sun Rays",175); switch(q,13,S.rays,function(v) S.rays=v; rays.Enabled=v end); slider(q,"Сила",60,0,100,40,function(v) rays.Intensity=v/250 end)
+    local q2=card(b,"Depth of Field",175); switch(q2,13,S.dof,function(v) S.dof=v; dof.Enabled=v end); slider(q2,"Фокус",60,0,100,40,function(v) dof.FocusDistance=v end)
+    local r=card(c,"Blur",145); switch(r,13,S.blur,function(v) S.blur=v; blur.Enabled=v end); slider(r,"Размер",60,0,100,20,function(v) blur.Size=v/4 end)
+    local s=card(c,"Пресеты",190); dropdown(s,"Стиль",{"Default","Purple","Warm","Cold","Neon"},55,function(v) local t={Default=Color3.new(1,1,1),Purple=Color3.fromRGB(225,205,255),Warm=Color3.fromRGB(255,225,195),Cold=Color3.fromRGB(200,225,255),Neon=Color3.fromRGB(255,120,255)}; colorFx.TintColor=t[v]; colorFx.Enabled=v~="Default" end)
 end
-
--- Toggle
-local function makeToggle(parent, label, initState, yPos, cb)
-	local lbl = Instance.new("TextLabel")
-	lbl.Text = label; lbl.Font = FONT_TEXT; lbl.TextSize = 14
-	lbl.TextColor3 = Themes[State.CurrentTheme].Text
-	lbl.Size = UDim2.new(1,-40,0,22); lbl.Position = UDim2.new(0,22,0,yPos)
-	lbl.TextXAlignment = Enum.TextXAlignment.Left
-	lbl.BackgroundTransparency = 1; lbl.ZIndex = 602; lbl.Parent = parent
-	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0,50,0,26); btn.Position = UDim2.new(1,-75,0,yPos)
-	btn.BackgroundColor3 = initState and Themes[State.CurrentTheme].Accent or Color3.fromRGB(100,100,100)
-	btn.BackgroundTransparency = 0.3; btn.Text = ""; btn.ZIndex = 602; btn.Parent = parent
-	local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(1,0); bc.Parent = btn
-	local knob = Instance.new("Frame")
-	knob.Size = UDim2.new(0,20,0,20)
-	knob.Position = initState and UDim2.new(1,-22,0.5,-10) or UDim2.new(0,2,0.5,-10)
-	knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
-	knob.BorderSizePixel = 0; knob.ZIndex = 603; knob.Parent = btn
-	local kc = Instance.new("UICorner"); kc.CornerRadius = UDim.new(1,0); kc.Parent = knob
-	local st = initState
-	addConnection(btn.MouseButton1Click:Connect(function()
-		if ScriptUnloaded then return end
-		st = not st
-		if st then
-			TweenService:Create(btn, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = Themes[State.CurrentTheme].Accent}):Play()
-			TweenService:Create(knob, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(1,-22,0.5,-10)}):Play()
-			playSound(SFX.On)
-		else
-			TweenService:Create(btn, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {BackgroundColor3 = Color3.fromRGB(100,100,100)}):Play()
-			TweenService:Create(knob, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0,2,0.5,-10)}):Play()
-			playSound(SFX.Off)
-		end
-		cb(st)
-	end))
+local function charactersTab(a,b,c)
+    local kinds={"Bunny","Fox","Cat","Wolf","Dragon","Ghost","Robot","Ghoul"}; local cols={a,b,c}
+    for i,k in ipairs(kinds) do local f=card(cols[(i-1)%3+1],k,150); line(f,k=="Ghoul" and "Белые волосы · маска · красный глаз" or "Клиентский декоративный морф",52); action(f,morphKind==k and "◉ АКТИВНО" or "СТАТЬ "..string.upper(k),95,function() buildMorph(k); S.morph=k; build("Characters") end) end
+    local f=card(c,"Сброс",115); action(f,"ВЕРНУТЬ ЧЕЛОВЕКА",60,function() buildMorph(nil); S.morph=nil; build("Characters") end)
 end
-
--- Color picker
-local function makeColorPicker(parent, label, initColor, yPos, cb)
-	local lbl = Instance.new("TextLabel")
-	lbl.Text = label; lbl.Font = FONT_TEXT; lbl.TextSize = 14
-	lbl.TextColor3 = Themes[State.CurrentTheme].Text
-	lbl.Size = UDim2.new(1,-40,0,22); lbl.Position = UDim2.new(0,22,0,yPos)
-	lbl.TextXAlignment = Enum.TextXAlignment.Left
-	lbl.BackgroundTransparency = 1; lbl.ZIndex = 602; lbl.Parent = parent
-	local prev = Instance.new("TextButton")
-	prev.Size = UDim2.new(0,65,0,28); prev.Position = UDim2.new(1,-85,0,yPos)
-	prev.BackgroundColor3 = initColor; prev.Text = ""; prev.ZIndex = 602; prev.Parent = parent
-	local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0,5); pc.Parent = prev
-	local ps = Instance.new("UIStroke"); ps.Color = Themes[State.CurrentTheme].Stroke; ps.Transparency = 0.5; ps.Parent = prev
-	local palette = Instance.new("Frame")
-	palette.Size = UDim2.new(0,200,0,30); palette.Position = UDim2.new(0,22,0,yPos+32)
-	palette.BackgroundTransparency = 1; palette.ZIndex = 602; palette.Parent = parent
-	local cols = {Color3.fromRGB(255,255,255), Color3.fromRGB(255,0,0), Color3.fromRGB(0,255,0), Color3.fromRGB(0,0,255), Color3.fromRGB(255,255,0), Color3.fromRGB(0,0,0)}
-	for i, c in ipairs(cols) do
-		local b = Instance.new("TextButton")
-		b.Size = UDim2.new(0,28,0,28); b.Position = UDim2.new(0,(i-1)*33,0,0)
-		b.BackgroundColor3 = c; b.Text = ""; b.ZIndex = 603; b.Parent = palette
-		local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0,4); bc.Parent = b
-		addConnection(b.MouseButton1Click:Connect(function()
-			if ScriptUnloaded then return end
-			prev.BackgroundColor3 = c; cb(c); playSound(SFX.On)
-		end))
-	end
+local function cosmeticsTab(a,b,c)
+    local p=card(a,"Косметика",430); line(p,"Активные эффекты персонажа",52); local y=84
+    for _,name in ipairs({"Kagune","Wings","Halo","Horns","Hat"}) do
+        local row=new("Frame",{Size=UDim2.new(1,-36,0,48),Position=UDim2.fromOffset(18,y),BackgroundColor3=C.field,BorderSizePixel=0},p); corner(row,7); stroke(row)
+        local lbl=label(row,cosmeticLabels[name],12,true); lbl.Size=UDim2.new(1,-85,1,0); lbl.Position=UDim2.fromOffset(10,0)
+        switch(row,11,S.cosmetics[name]==true,function(v) toggleCosmetic(name,v) end); y=y+55
+    end
+    local q=card(b,"О косметике",170); line(q,"Позиции обновляются каждый кадр.",55); line(q,"Работает с морфом и персонажем.",85); line(q,"Kagune: четыре дугообразных",115); line(q,"щупальца из области спины.",140)
+    local r=card(c,"Совет",150); line(r,"Для предметов сначала выбери",55); line(r,"морф, затем нужный предмет.",85)
 end
-
--- ================= SETTINGS WINDOWS CREATION =================
-local fogW = createSettingsWindow("Fog", "Настройки тумана", Vector2.new(380,400))
-makeSlider(fogW.frame, "Плотность", 0,1, State.FogSettings.Density, 55, function(v) State.FogSettings.Density = v; applyFog() end)
-makeSlider(fogW.frame, "Смещение", -1,1, State.FogSettings.Offset, 120, function(v) State.FogSettings.Offset = v; applyFog() end)
-makeColorPicker(fogW.frame, "Цвет тумана", State.FogSettings.Color, 185, function(c) State.FogSettings.Color = c; applyFog() end)
-makeColorPicker(fogW.frame, "Цвет затухания", State.FogSettings.Decay, 260, function(c) State.FogSettings.Decay = c; applyFog() end)
-
-local aspectW = createSettingsWindow("Aspect", "Настройки растяжения", Vector2.new(380,170))
-makeSlider(aspectW.frame, "Сила (0.5-1.5)", 0.5,1.5, State.AspectValue, 55, function(v) State.AspectValue = v end)
-
-local fbW = createSettingsWindow("Fullbright", "Fullbright", Vector2.new(380,170))
-makeSlider(fbW.frame, "Яркость (1-10)", 1,10, State.FullbrightBrightness, 55, function(v) State.FullbrightBrightness = v; if State.FullbrightEnabled then applyFullbright() end end)
-
-local mbW = createSettingsWindow("MotionBlur", "Motion Blur", Vector2.new(380,170))
-makeSlider(mbW.frame, "Сила", 0,56, State.MotionBlurStrength, 55, function(v) State.MotionBlurStrength = v end)
-
-local worldW = createSettingsWindow("World", "Visuals", Vector2.new(380,340))
-makeSlider(worldW.frame, "Насыщенность", -1,1, State.WorldSettings.Saturation, 55, function(v) State.WorldSettings.Saturation = v; applyWorld() end)
-makeSlider(worldW.frame, "Контраст", -1,1, State.WorldSettings.Contrast, 120, function(v) State.WorldSettings.Contrast = v; applyWorld() end)
-makeSlider(worldW.frame, "Яркость", -0.5,0.5, State.WorldSettings.Brightness, 185, function(v) State.WorldSettings.Brightness = v; applyWorld() end)
-makeColorPicker(worldW.frame, "Цвет мира", State.WorldSettings.TintColor, 250, function(c) State.WorldSettings.TintColor = c; applyWorld() end)
-
-local jumpW = createSettingsWindow("JumpCircle", "Jump Circle", Vector2.new(380,440))
-local jumpLbl = Instance.new("TextLabel")
-jumpLbl.Text = "Стиль:"; jumpLbl.Font = FONT_TEXT; jumpLbl.TextSize = 14
-jumpLbl.TextColor3 = Themes[State.CurrentTheme].Text
-jumpLbl.Size = UDim2.new(1,-40,0,22); jumpLbl.Position = UDim2.new(0,22,0,50)
-jumpLbl.TextXAlignment = Enum.TextXAlignment.Left
-jumpLbl.BackgroundTransparency = 1; jumpLbl.ZIndex = 602; jumpLbl.Parent = jumpW.frame
-local styleButtons = {}
-local function makeStyleBtn(label, styleName, yPos)
-	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(0.9,0,0,30); b.Position = UDim2.new(0.05,0,0,yPos)
-	b.BackgroundColor3 = (State.JumpCircleStyle == styleName) and Themes[State.CurrentTheme].Accent or Themes[State.CurrentTheme].Card
-	b.BackgroundTransparency = 0.3; b.Text = label; b.Font = FONT_TEXT; b.TextSize = 14
-	b.TextColor3 = Themes[State.CurrentTheme].Text
-	b.AutoButtonColor = false; b.ZIndex = 602; b.Parent = jumpW.frame
-	local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0,6); bc.Parent = b
-	local bs = Instance.new("UIStroke"); bs.Color = Themes[State.CurrentTheme].Stroke; bs.Transparency = 0.5; bs.Parent = b
-	addConnection(b.MouseButton1Click:Connect(function()
-		if ScriptUnloaded then return end
-		State.JumpCircleStyle = styleName
-		for _, x in ipairs(styleButtons) do
-			TweenService:Create(x, TweenInfo.new(0.25), {BackgroundColor3 = Themes[State.CurrentTheme].Card}):Play()
-		end
-		TweenService:Create(b, TweenInfo.new(0.25), {BackgroundColor3 = Themes[State.CurrentTheme].Accent}):Play()
-		playSound(SFX.On)
-	end))
-	table.insert(styleButtons, b)
+local function itemsTab(a,b,c)
+    local p=card(a,"Оружие и предметы",395); line(p,"Выбери предмет для правой руки",52); local y=82
+    for _,k in ipairs({"Sword","Staff","Lantern","Wand","Pistol"}) do action(p,(S.item==k and "◉ " or "  ")..k,y,function() buildItem(k); build("Items") end); y=y+47 end
+    action(p,"Убрать предмет",y+4,function() buildItem(nil); build("Items") end)
+    local q=card(b,"Точка хвата",140); line(q,"Sword: рукоять",55); line(q,"Staff: нижний конец",82); line(q,"Lantern / Wand: ручка",109)
 end
-makeStyleBtn("Палочки", "segments", 80)
-makeStyleBtn("Круг", "circle", 115)
-makeStyleBtn("Квадрат", "square", 150)
-makeToggle(jumpW.frame, "Свечение", State.JumpCircleGlow, 200, function(s) State.JumpCircleGlow = s end)
-makeToggle(jumpW.frame, "Использовать цвет темы", State.JumpCircleUseTheme, 250, function(s)
-	State.JumpCircleUseTheme = s
-	if s then updateJumpCircleColor(getVisualColor(true, nil)) else updateJumpCircleColor(State.JumpCircleCustomColor) end
+local function worldTab(a,b,c)
+    local p=card(a,"Custom Sky",skyExpanded and 590 or 70); switch(p,13,S.skyEnabled,function(v) S.skyEnabled=v; applySky() end)
+    local expand=new("TextButton",{Size=UDim2.new(1,-90,0,48),Position=UDim2.fromOffset(8,3),BackgroundTransparency=1,Text="",},p)
+    local arrow=label(p,skyExpanded and "▲" or "▼",16,true,C.muted); arrow.Size=UDim2.fromOffset(22,24); arrow.Position=UDim2.new(1,-95,0,14)
+    expand.MouseButton1Click:Connect(function() skyExpanded=not skyExpanded; build("World") end)
+    if skyExpanded then
+        line(p,"Пресет неба",62)
+        for i,n in ipairs(skyOrder) do action(p,(S.skyChoice==n and "●  " or "○  ")..n,88+(i-1)*34,function() S.skyChoice=n; if S.skyEnabled then applySky() end; build("World") end) end
+        slider(p,"Звёзды",438,0,5000,S.skyStars,function(v) S.skyStars=v; if S.skyEnabled then applySky() end end,100)
+        action(p,"Небесные тела: "..(S.skyMoon and "ВКЛ" or "ВЫКЛ"),492,function() S.skyMoon=not S.skyMoon; if S.skyEnabled then applySky() end; build("World") end)
+        line(p,"Локально · выкл восстанавливает оригинал",535)
+    end
+    local q=card(b,"Ночной режим",135); switch(q,13,S.night,function(v) S.night=v; Lighting.ClockTime=v and 0 or saved.clock end)
+    local q2=card(b,"Полная яркость",135); switch(q2,13,S.full,function(v) S.full=v; Lighting.Brightness=v and 5 or saved.brightness end)
+    local q3=card(b,"Ambient акцент",135); switch(q3,13,S.amb,function(v) S.amb=v; Lighting.Ambient=v and C.accent or saved.ambient end)
+    local r=card(c,"Туман",350)
+    slider(r,"FogEnd",55,100,100000,S.fogEnd,function(v) S.fogEnd=v; Lighting.FogEnd=v end,100)
+    dropdown(r,"Цвет тумана",{"Violet","Red","Blue","Green","Gray","White"},110,function(v) S.fogChoice=v; local colors={Violet=Color3.fromRGB(43,27,75),Red=Color3.fromRGB(70,10,22),Blue=Color3.fromRGB(20,45,90),Green=Color3.fromRGB(18,73,62),Gray=Color3.fromRGB(100,100,110),White=Color3.fromRGB(220,220,230)}; Lighting.FogColor=colors[v]; if S.skyEnabled then applySky(); Lighting.FogColor=colors[v] end end)
+    slider(r,"Atmosphere density ×100",190,0,100,math.floor(S.atmDensity*100),function(v) S.atmDensity=v/100; local atm=Lighting:FindFirstChild("VV_Atm") or Lighting:FindFirstChildOfClass("Atmosphere"); if atm then atm.Density=S.atmDensity end end)
+end
+local function settingsTab(a,b,c)
+    local p=card(a,"Интерфейс",170); line(p,"Violet Visuals v4",52); line(p,"Клиентский интерфейс",82); action(p,"ЗАКРЫТЬ МЕНЮ",115,function() setOpen(false) end)
+    local q=card(b,"Управление",160); line(q,"RightShift — открыть / закрыть",55); line(q,"Перетаскивание шапки",85)
+    local r=card(c,"Цветовая тема",350); line(r,"Нажми на цвет",52)
+    local swatches={
+        {Color3.fromRGB(150,110,255),Color3.fromRGB(255,110,180)}, {Color3.fromRGB(30,180,255),Color3.fromRGB(80,110,255)},
+        {Color3.fromRGB(30,220,160),Color3.fromRGB(10,150,120)}, {Color3.fromRGB(255,70,80),Color3.fromRGB(255,150,50)},
+        {Color3.fromRGB(255,190,50),Color3.fromRGB(255,100,40)}, {Color3.fromRGB(240,100,200),Color3.fromRGB(150,80,255)},
+        {Color3.fromRGB(220,230,245),Color3.fromRGB(120,140,170)}, {Color3.fromRGB(100,255,90),Color3.fromRGB(0,190,80)},
+        {Color3.fromRGB(255,255,255),Color3.fromRGB(140,140,160)}, {Color3.fromRGB(80,80,100),Color3.fromRGB(20,20,30)}}
+    local function recolor()
+        logo.TextColor3=C.accent; toggleOpen.TextColor3=C.accent; body.ScrollBarImageColor3=C.accent
+        for _,o in ipairs(gui:GetDescendants()) do
+            if o:IsA("UIGradient") and o.Parent and o.Parent.Name~="Main" then o.Color=ColorSequence.new(C.accent,C.accent2) end
+            if o:IsA("Frame") and o.BackgroundColor3==Color3.fromRGB(150,110,255) then o.BackgroundColor3=C.accent end
+            if o:IsA("TextButton") and o.TextColor3==C.accent then o.TextColor3=C.accent end
+        end
+        for _,t in pairs(tabButtons) do t.TextColor3=(t.Name==currentTab) and C.accent or C.muted end
+    end
+    for i,pair in ipairs(swatches) do
+        local x=((i-1)%5); local y=math.floor((i-1)/5)
+        local btn=new("TextButton",{Size=UDim2.fromOffset(48,48),Position=UDim2.fromOffset(22+x*60,88+y*62),BackgroundColor3=pair[1],Text="",BorderSizePixel=0},r); corner(btn,9); stroke(btn,C.line,1); grad(btn,pair[1],pair[2],45)
+        btn.MouseButton1Click:Connect(function() C.accent=pair[1]; C.accent2=pair[2]; recolor() end)
+    end
+    local note=label(r,"Акцент меняется сразу",11,false,C.muted); note.Size=UDim2.new(1,-36,0,24); note.Position=UDim2.fromOffset(18,225)
+end
+build=function(tab)
+    currentTab=tab or currentTab; clearColumns(); local a,b,c=column(),column(),column()
+    if currentTab=="Characters" then charactersTab(a,b,c) elseif currentTab=="Cosmetics" then cosmeticsTab(a,b,c) elseif currentTab=="Items" then itemsTab(a,b,c) elseif currentTab=="Shaders" then shadersTab(a,b,c) elseif currentTab=="World" then worldTab(a,b,c) elseif currentTab=="Settings" then settingsTab(a,b,c) end
+    for n,t in pairs(tabButtons) do t.TextColor3=n==currentTab and C.accent or C.muted end
+end
+for _,name in ipairs({"Characters","Cosmetics","Items","Shaders","World","Settings"}) do
+    local t=new("TextButton",{Name=name,Size=UDim2.fromOffset(96,39),BackgroundTransparency=1,Text=name,TextSize=12,Font=Enum.Font.GothamBold,TextColor3=C.muted,BorderSizePixel=0},tabs); tabButtons[name]=t
+    t.MouseButton1Click:Connect(function() build(name) end)
+end
+build("Characters")
+toggleOpen.MouseButton1Click:Connect(function() setOpen(true) end)
+UIS.InputBegan:Connect(function(i,gp) if not gp and i.KeyCode==Enum.KeyCode.RightShift then setOpen(not main.Visible) end end)
+local dragging,dragStart,origin
+header.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=i; dragStart=i.Position; origin=main.Position end end)
+UIS.InputChanged:Connect(function(i) if dragging and (i==dragging or i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then local d=i.Position-dragStart; main.Position=UDim2.new(origin.X.Scale,origin.X.Offset+d.X,origin.Y.Scale,origin.Y.Offset+d.Y) end end)
+UIS.InputEnded:Connect(function(i) if dragging and (i==dragging or i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch) then dragging=nil end end)
+local updateLoop=RunService.RenderStepped:Connect(function()
+    local t=os.clock(); for _,c in pairs(cosmeticRegistry) do c.update(t) end; updateItem()
 end)
-makeColorPicker(jumpW.frame, "Свой цвет", State.JumpCircleCustomColor, 320, function(c)
-	State.JumpCircleCustomColor = c
-	if not State.JumpCircleUseTheme then updateJumpCircleColor(c) end
-end)
-
-local partW = createSettingsWindow("Particles", "Particles", Vector2.new(380,250))
-makeToggle(partW.frame, "Использовать цвет темы", State.ParticlesUseTheme, 55, function(s)
-	State.ParticlesUseTheme = s
-	if s then updateParticlesColor(getVisualColor(true, nil)) else updateParticlesColor(State.ParticlesCustomColor) end
-end)
-makeColorPicker(partW.frame, "Свой цвет", State.ParticlesCustomColor, 120, function(c)
-	State.ParticlesCustomColor = c
-	if not State.ParticlesUseTheme then updateParticlesColor(c) end
-end)
-
-local trailW = createSettingsWindow("Trails", "Trails", Vector2.new(380,250))
-makeToggle(trailW.frame, "Использовать цвет темы", State.TrailsUseTheme, 55, function(s)
-	State.TrailsUseTheme = s
-	if s then updateTrailsColor(getVisualColor(true, nil)) else updateTrailsColor(State.TrailsCustomColor) end
-end)
-makeColorPicker(trailW.frame, "Свой цвет", State.TrailsCustomColor, 120, function(c)
-	State.TrailsCustomColor = c
-	if not State.TrailsUseTheme then updateTrailsColor(c) end
-end)
-
-local hatW = createSettingsWindow("ChinaHat", "China Hat", Vector2.new(380,300))
-makeToggle(hatW.frame, "Свечение", State.ChinaHatGlow, 55, function(s)
-	State.ChinaHatGlow = s
-	if State.ChinaHatEnabled then applyChinaHat() end
-end)
-makeToggle(hatW.frame, "Использовать цвет темы", State.ChinaHatUseTheme, 105, function(s)
-	State.ChinaHatUseTheme = s
-	if s then updateChinaHatColor(getVisualColor(true, nil)) else updateChinaHatColor(State.ChinaHatCustomColor) end
-end)
-makeColorPicker(hatW.frame, "Свой цвет", State.ChinaHatCustomColor, 170, function(c)
-	State.ChinaHatCustomColor = c
-	if not State.ChinaHatUseTheme then updateChinaHatColor(c) end
-end)
-
-local wingsW = createSettingsWindow("Wings", "Wings", Vector2.new(380,300))
-makeToggle(wingsW.frame, "Свечение", State.WingsGlow, 55, function(s)
-	State.WingsGlow = s
-	if State.WingsEnabled then applyWings() end
-end)
-makeToggle(wingsW.frame, "Использовать цвет темы", State.WingsUseTheme, 105, function(s)
-	State.WingsUseTheme = s
-	if s then updateWingsColor(getVisualColor(true, nil)) else updateWingsColor(State.WingsCustomColor) end
-end)
-makeColorPicker(wingsW.frame, "Свой цвет", State.WingsCustomColor, 170, function(c)
-	State.WingsCustomColor = c
-	if not State.WingsUseTheme then updateWingsColor(c) end
-end)
-
-local kaguneW = createSettingsWindow("Kagune", "Kagune", Vector2.new(380,300))
-makeToggle(kaguneW.frame, "Свечение", State.KaguneGlow, 55, function(s)
-	State.KaguneGlow = s
-	if State.KaguneEnabled then applyKagune() end
-end)
-makeToggle(kaguneW.frame, "Использовать цвет темы", State.KaguneUseTheme, 105, function(s)
-	State.KaguneUseTheme = s
-	if s then updateKaguneColor(getVisualColor(true, nil)) else updateKaguneColor(State.KaguneCustomColor) end
-end)
-makeColorPicker(kaguneW.frame, "Свой цвет", State.KaguneCustomColor, 170, function(c)
-	State.KaguneCustomColor = c
-	if not State.KaguneUseTheme then updateKaguneColor(c) end
-end)
-
-local skyW = createSettingsWindow("Sky", "Custom Sky", Vector2.new(380,220))
-local skyLbl = Instance.new("TextLabel")
-skyLbl.Text = "Выбор скайбокса:"; skyLbl.Font = FONT_TEXT; skyLbl.TextSize = 14
-skyLbl.TextColor3 = Themes[State.CurrentTheme].Text
-skyLbl.Size = UDim2.new(1,-40,0,22); skyLbl.Position = UDim2.new(0,22,0,50)
-skyLbl.TextXAlignment = Enum.TextXAlignment.Left
-skyLbl.BackgroundTransparency = 1; skyLbl.ZIndex = 602; skyLbl.Parent = skyW.frame
-local skyButtons = {}
-for i, d in ipairs(SKIES) do
-	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(0.9,0,0,30)
-	b.Position = UDim2.new(0.05,0,0,80 + (i-1)*35)
-	b.BackgroundColor3 = (State.SkyIndex == i) and Themes[State.CurrentTheme].Accent or Themes[State.CurrentTheme].Card
-	b.BackgroundTransparency = 0.3; b.Text = d.name
-	b.Font = FONT_TEXT; b.TextSize = 14
-	b.TextColor3 = Themes[State.CurrentTheme].Text
-	b.AutoButtonColor = false; b.ZIndex = 602; b.Parent = skyW.frame
-	local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0,6); bc.Parent = b
-	local bs = Instance.new("UIStroke"); bs.Color = Themes[State.CurrentTheme].Stroke; bs.Transparency = 0.5; bs.Parent = b
-	addConnection(b.MouseButton1Click:Connect(function()
-		if ScriptUnloaded then return end
-		State.SkyIndex = i; applySky()
-		for _, x in ipairs(skyButtons) do
-			TweenService:Create(x, TweenInfo.new(0.25), {BackgroundColor3 = Themes[State.CurrentTheme].Card}):Play()
-		end
-		TweenService:Create(b, TweenInfo.new(0.25), {BackgroundColor3 = Themes[State.CurrentTheme].Accent}):Play()
-		playSound(SFX.On)
-	end))
-	table.insert(skyButtons, b)
+_G.VV_Cleanup=function()
+    if updateLoop then updateLoop:Disconnect() end
+    if followConn then followConn:Disconnect() end; if hideConn then hideConn:Disconnect() end; if charConn then charConn:Disconnect() end
+    if activeMorph then activeMorph:Destroy(); activeMorph=nil end
+    restoreCharacter(player.Character)
+    for _,c in pairs(cosmeticRegistry) do pcall(c.cleanup) end; cosmeticRegistry={}
+    if itemRegistry then itemRegistry.model:Destroy(); itemRegistry=nil end
+    for _,e in ipairs({bloom,colorFx,rays,dof,blur}) do e:Destroy() end
+    wipeWorld(); restoreWorld()
+    if gui then gui:Destroy() end
 end
-
--- ================= OPEN SETTINGS (impl) =================
--- [FIX 4] Присваиваем в forward-declared local, а не создаём глобальную
-openSettings = function(name)
-	for _, w in pairs(WINS) do if w.frame then w.frame.Visible = false end end
-	if WINS[name] then
-		hideMain()
-		WINS[name].frame.Visible = true
-		local sizes = {
-			Fog = Vector2.new(380,400), Aspect = Vector2.new(380,170),
-			Fullbright = Vector2.new(380,170), MotionBlur = Vector2.new(380,170),
-			World = Vector2.new(380,340), JumpCircle = Vector2.new(380,440),
-			Particles = Vector2.new(380,250), Trails = Vector2.new(380,250),
-			ChinaHat = Vector2.new(380,300), Wings = Vector2.new(380,300),
-			Kagune = Vector2.new(380,300), Sky = Vector2.new(380,220)
-		}
-		local ts = sizes[name] or Vector2.new(380,170)
-		WINS[name].frame.Size = UDim2.new(0,0,0,0)
-		WINS[name].frame.Position = UDim2.new(0.5,0,0.5,0)
-		TweenService:Create(WINS[name].frame, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-			Size = UDim2.new(0,ts.X,0,ts.Y), Position = UDim2.new(0.5,-ts.X/2,0.5,-ts.Y/2)
-		}):Play()
-		State.OpenSettings = name
-		setOverlay(true)
-	end
-end
-
--- ================= VISUAL CARDS CREATION =================
-createVisualCard("Fog Blur", "Туман в мире. ПКМ - настройки.", "FogEnabled", function() applyFog() end, function() openSettings("Fog") end)
-createVisualCard("Custom Sky", "Смена неба. ПКМ - выбор.", "SkyEnabled", function() applySky() end, function() openSettings("Sky") end)
-createVisualCard("Aspect Ratio", "Растяг экрана. ПКМ - настройки.", "AspectEnabled", nil, function() openSettings("Aspect") end)
-createVisualCard("Fullbright", "Полное освещение. ПКМ - настройки.", "FullbrightEnabled", function() applyFullbright() end, function() openSettings("Fullbright") end)
-createVisualCard("Motion Blur", "Размытие при движении. ПКМ - настройки.", "MotionBlurEnabled", nil, function() openSettings("MotionBlur") end)
-createVisualCard("Visuals", "Настройка цвета мира. ПКМ - настройки.", "WorldEnabled", function() applyWorld() end, function() openSettings("World") end)
-createVisualCard("HUD", "Dynamic Island с FPS и PING.", "HudEnabled", function(s)
-	HUD.frame.Visible = s
-	if s then
-		HUD.frame.Size = UDim2.new(0,0,0,38)
-		HUD.frame.Position = UDim2.new(0.5,0,0,15)
-		TweenService:Create(HUD.frame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-			Size = UDim2.new(0,280,0,38), Position = UDim2.new(0.5,-140,0,15)
-		}):Play()
-	end
-end, nil)
-createVisualCard("Jump Circle", "Круг при прыжке. ПКМ - цвет и стиль.", "JumpCircleEnabled", function(s) if s then setupJumpCircle() end end, function() openSettings("JumpCircle") end)
-createVisualCard("Particles", "Светящиеся снежинки. ПКМ - цвет.", "ParticlesEnabled", function() applyParticles() end, function() openSettings("Particles") end)
-createVisualCard("Trails", "След за спиной. ПКМ - цвет.", "TrailsEnabled", function() applyTrails() end, function() openSettings("Trails") end)
-createVisualCard("China Hat", "Шляпа над головой. ПКМ - цвет.", "ChinaHatEnabled", function() applyChinaHat() end, function() openSettings("ChinaHat") end)
-createVisualCard("Wings", "Крылья. ПКМ - цвет.", "WingsEnabled", function() applyWings() end, function() openSettings("Wings") end)
-createVisualCard("Kagune", "Щупальца. ПКМ - цвет.", "KaguneEnabled", function() applyKagune() end, function() openSettings("Kagune") end)
-createVisualCard("Optimization", "Разблокирует FPS выше лимита.", "OptimizationEnabled", nil, nil)
-
--- ================= THEME CARDS =================
-local themeCards = {}
-for _, themeName in ipairs(ThemeOrder) do
-	local th = Themes[themeName]
-	local c = Instance.new("TextButton")
-	c.Name = "Theme_"..themeName
-	c.Size = UDim2.new(0.23,0,0,110)
-	c.BackgroundColor3 = th.Card
-	c.BackgroundTransparency = 0.3
-	c.BorderSizePixel = 0; c.Text = ""; c.AutoButtonColor = false
-	c.ZIndex = 12; c.Parent = UI.themes
-	local co = Instance.new("UICorner"); co.CornerRadius = UDim.new(0,10); co.Parent = c
-	local st = Instance.new("UIStroke")
-	st.Color = th.Stroke; st.Transparency = 0.5; st.Thickness = 2; st.Parent = c
-	local cd = Instance.new("Frame")
-	cd.Size = UDim2.new(0,40,0,40); cd.Position = UDim2.new(0.5,-20,0,15)
-	cd.BackgroundColor3 = th.Accent; cd.BorderSizePixel = 0; cd.ZIndex = 13; cd.Parent = c
-	local cdc = Instance.new("UICorner"); cdc.CornerRadius = UDim.new(1,0); cdc.Parent = cd
-	local cds = Instance.new("UIStroke"); cds.Color = Color3.fromRGB(255,255,255); cds.Transparency = 0.4; cds.Thickness = 2; cds.Parent = cd
-	local nl = Instance.new("TextLabel")
-	nl.Text = themeName; nl.Font = FONT_MAIN; nl.TextSize = 14
-	nl.TextColor3 = th.Text
-	nl.Size = UDim2.new(1,0,0,25); nl.Position = UDim2.new(0,0,1,-35)
-	nl.BackgroundTransparency = 1; nl.ZIndex = 13; nl.Parent = c
-	if themeName == State.CurrentTheme then st.Transparency = 0; st.Thickness = 3 end
-	themeCards[themeName] = {card = c, stroke = st, dot = cd}
-	addConnection(c.MouseEnter:Connect(function()
-		TweenService:Create(c, TweenInfo.new(0.2), {BackgroundTransparency = 0.1}):Play()
-	end))
-	addConnection(c.MouseLeave:Connect(function()
-		TweenService:Create(c, TweenInfo.new(0.2), {BackgroundTransparency = 0.3}):Play()
-	end))
-	addConnection(c.MouseButton1Click:Connect(function()
-		if ScriptUnloaded then return end
-		applyTheme(themeName)
-		playSound(SFX.On)
-	end))
-end
-
--- ================= APPLY THEME =================
--- [FIX 3] Через присваивание в forward-declared local
-applyThemeToUI = function(themeName)
-	local th = Themes[themeName]; if not th then return end
-	local ti = TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-
-	TweenService:Create(UI.main, ti, {BackgroundColor3 = th.Bg}):Play()
-	TweenService:Create(UI.mainStroke, ti, {Color = th.Stroke}):Play()
-	TweenService:Create(UI.sidebar, ti, {BackgroundColor3 = th.Bg}):Play()
-	TweenService:Create(UI.sideStroke, ti, {Color = th.Stroke}):Play()
-	TweenService:Create(UI.title, ti, {TextColor3 = th.Text}):Play()
-	TweenService:Create(UI.separator, ti, {BackgroundColor3 = th.Stroke}):Play()
-	TweenService:Create(UI.visuals, ti, {ScrollBarImageColor3 = th.Accent}):Play()
-	TweenService:Create(UI.themes, ti, {ScrollBarImageColor3 = th.Accent}):Play()
-	TweenService:Create(UI.indVisuals, ti, {BackgroundColor3 = th.Accent}):Play()
-	TweenService:Create(UI.indThemes, ti, {BackgroundColor3 = th.Accent}):Play()
-	TweenService:Create(UI.indConfigs, ti, {BackgroundColor3 = th.Accent}):Play()
-	TweenService:Create(HUD.frame, ti, {BackgroundColor3 = th.Bg}):Play()
-	TweenService:Create(HUD.stroke, ti, {Color = th.Stroke}):Play()
-	TweenService:Create(HUD.label, ti, {TextColor3 = th.Text}):Play()
-
-	if CFG and CFG.title then
-		TweenService:Create(CFG.title, ti, {TextColor3 = th.Text}):Play()
-		TweenService:Create(CFG.save, ti, {BackgroundColor3 = th.Card, TextColor3 = th.Text}):Play()
-		TweenService:Create(CFG.refresh, ti, {BackgroundColor3 = th.Card, TextColor3 = th.Text}):Play()
-		TweenService:Create(CFG.importBtn, ti, {BackgroundColor3 = th.Card, TextColor3 = th.Text}):Play()
-		TweenService:Create(CFG.explorer, ti, {BackgroundColor3 = th.Card}):Play()
-		TweenService:Create(CFG.explorerStroke, ti, {Color = th.Stroke}):Play()
-		TweenService:Create(CFG.explorerScroll, ti, {ScrollBarImageColor3 = th.Accent}):Play()
-		TweenService:Create(CFG.load, ti, {BackgroundColor3 = th.Card, TextColor3 = th.Text}):Play()
-		TweenService:Create(CFG.delete, ti, {BackgroundColor3 = th.Card, TextColor3 = th.Text}):Play()
-		TweenService:Create(CFG.path, ti, {TextColor3 = th.Text}):Play()
-	end
-
-	for _, child in ipairs(UI.visuals:GetChildren()) do
-		if child:IsA("TextButton") then
-			TweenService:Create(child, ti, {BackgroundColor3 = th.Card}):Play()
-			local s = child:FindFirstChildOfClass("UIStroke")
-			if s then TweenService:Create(s, ti, {Color = th.Stroke}):Play() end
-			for _, sub in ipairs(child:GetChildren()) do
-				if sub:IsA("TextLabel") then TweenService:Create(sub, ti, {TextColor3 = th.Text}):Play() end
-			end
-		end
-	end
-	for _, d in pairs(themeCards) do
-		if d.stroke then TweenService:Create(d.stroke, ti, {Color = th.Stroke}):Play() end
-	end
-	for _, w in pairs(WINS) do
-		if w.frame then
-			TweenService:Create(w.frame, ti, {BackgroundColor3 = th.Bg}):Play()
-			if w.stroke then TweenService:Create(w.stroke, ti, {Color = th.Stroke}):Play() end
-			for _, sub in ipairs(w.frame:GetDescendants()) do
-				if sub:IsA("TextLabel") then TweenService:Create(sub, ti, {TextColor3 = th.Text}):Play()
-				elseif sub:IsA("UIStroke") then TweenService:Create(sub, ti, {Color = th.Stroke}):Play() end
-			end
-		end
-	end
-	syncVisualCards()
-end
-
-applyTheme = function(themeName)
-	if ScriptUnloaded then return end
-	State.CurrentTheme = themeName
-	applyThemeToUI(themeName)
-	for name, d in pairs(themeCards) do
-		local t = (name == themeName)
-		TweenService:Create(d.stroke, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-			Transparency = t and 0 or 0.5, Thickness = t and 3 or 2
-		}):Play()
-	end
-end
-
--- ================= CONFIG UI =================
--- CFG уже объявлена выше (forward declaration)
-
-CFG.title = Instance.new("TextLabel")
-CFG.title.Text = "Проводник конфигов"
-CFG.title.Font = FONT_MAIN; CFG.title.TextSize = 20
-CFG.title.TextColor3 = Themes[State.CurrentTheme].Text
-CFG.title.Size = UDim2.new(1,-40,0,30); CFG.title.Position = UDim2.new(0,20,0,10)
-CFG.title.TextXAlignment = Enum.TextXAlignment.Left
-CFG.title.BackgroundTransparency = 1; CFG.title.ZIndex = 12; CFG.title.Parent = UI.configs
-
--- Button row with UIListLayout for alignment
-local btnRow = Instance.new("Frame")
-btnRow.Name = "ConfigButtonsRow"
-btnRow.Size = UDim2.new(1, -40, 0, 40)
-btnRow.Position = UDim2.new(0, 20, 0, 45)
-btnRow.BackgroundTransparency = 1
-btnRow.ZIndex = 12
-btnRow.Parent = UI.configs
-
-local btnLayout = Instance.new("UIListLayout")
-btnLayout.FillDirection = Enum.FillDirection.Horizontal
-btnLayout.SortOrder = Enum.SortOrder.LayoutOrder
-btnLayout.Padding = UDim.new(0, 10)
-btnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-btnLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-btnLayout.Parent = btnRow
-
-CFG.save = Instance.new("TextButton")
-CFG.save.Name = "SaveBtn"
-CFG.save.Size = UDim2.new(0, 0, 0, 36)
-CFG.save.BackgroundColor3 = Themes[State.CurrentTheme].Card
-CFG.save.BackgroundTransparency = 0.3
-CFG.save.Text = "Сохранить конфиг"
-CFG.save.Font = FONT_MAIN; CFG.save.TextSize = 14
-CFG.save.TextColor3 = Themes[State.CurrentTheme].Text
-CFG.save.AutoButtonColor = false
-CFG.save.LayoutOrder = 1
-CFG.save.ZIndex = 12
-CFG.save.Parent = btnRow
-local sc = Instance.new("UICorner"); sc.CornerRadius = UDim.new(0,8); sc.Parent = CFG.save
-local st1 = Instance.new("UIStroke"); st1.Color = Themes[State.CurrentTheme].Stroke; st1.Transparency = 0.5; st1.Parent = CFG.save
-
-CFG.refresh = Instance.new("TextButton")
-CFG.refresh.Name = "RefreshBtn"
-CFG.refresh.Size = UDim2.new(0, 0, 0, 36)
-CFG.refresh.BackgroundColor3 = Themes[State.CurrentTheme].Card
-CFG.refresh.BackgroundTransparency = 0.3
-CFG.refresh.Text = "Обновить список"
-CFG.refresh.Font = FONT_MAIN; CFG.refresh.TextSize = 14
-CFG.refresh.TextColor3 = Themes[State.CurrentTheme].Text
-CFG.refresh.AutoButtonColor = false
-CFG.refresh.LayoutOrder = 2
-CFG.refresh.ZIndex = 12
-CFG.refresh.Parent = btnRow
-local rc = Instance.new("UICorner"); rc.CornerRadius = UDim.new(0,8); rc.Parent = CFG.refresh
-local st2 = Instance.new("UIStroke"); st2.Color = Themes[State.CurrentTheme].Stroke; st2.Transparency = 0.5; st2.Parent = CFG.refresh
-
-CFG.importBtn = Instance.new("TextButton")
-CFG.importBtn.Name = "ImportBtn"
-CFG.importBtn.Size = UDim2.new(0, 0, 0, 36)
-CFG.importBtn.BackgroundColor3 = Themes[State.CurrentTheme].Card
-CFG.importBtn.BackgroundTransparency = 0.3
-CFG.importBtn.Text = "Скопировать путь"
-CFG.importBtn.Font = FONT_MAIN; CFG.importBtn.TextSize = 14
-CFG.importBtn.TextColor3 = Themes[State.CurrentTheme].Text
-CFG.importBtn.AutoButtonColor = false
-CFG.importBtn.LayoutOrder = 3
-CFG.importBtn.ZIndex = 12
-CFG.importBtn.Parent = btnRow
-local ic = Instance.new("UICorner"); ic.CornerRadius = UDim.new(0,8); ic.Parent = CFG.importBtn
-local st3 = Instance.new("UIStroke"); st3.Color = Themes[State.CurrentTheme].Stroke; st3.Transparency = 0.5; st3.Parent = CFG.importBtn
-
--- Auto-size buttons to fit content
-local function updateButtonWidths()
-	local rowWidth = btnRow.AbsoluteSize.X
-	if rowWidth <= 0 then return end
-	local padding = 20
-	local gap = 10
-	local btnW = (rowWidth - padding - gap*2) / 3
-	CFG.save.Size = UDim2.new(0, btnW, 0, 36)
-	CFG.refresh.Size = UDim2.new(0, btnW, 0, 36)
-	CFG.importBtn.Size = UDim2.new(0, btnW, 0, 36)
-end
-btnRow:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateButtonWidths)
-task.spawn(function()
-	task.wait(0.1)
-	updateButtonWidths()
-end)
-
-CFG.explorer = Instance.new("Frame")
-CFG.explorer.Size = UDim2.new(1,-40,0,320); CFG.explorer.Position = UDim2.new(0,20,0,95)
-CFG.explorer.BackgroundColor3 = Themes[State.CurrentTheme].Card
-CFG.explorer.BackgroundTransparency = 0.4
-CFG.explorer.BorderSizePixel = 0; CFG.explorer.ZIndex = 12; CFG.explorer.Parent = UI.configs
-local ec = Instance.new("UICorner"); ec.CornerRadius = UDim.new(0,10); ec.Parent = CFG.explorer
-CFG.explorerStroke = Instance.new("UIStroke")
-CFG.explorerStroke.Color = Themes[State.CurrentTheme].Stroke
-CFG.explorerStroke.Transparency = 0.5; CFG.explorerStroke.Parent = CFG.explorer
-
-CFG.explorerScroll = Instance.new("ScrollingFrame")
-CFG.explorerScroll.Size = UDim2.new(1,-16,1,-16); CFG.explorerScroll.Position = UDim2.new(0,8,0,8)
-CFG.explorerScroll.BackgroundTransparency = 1; CFG.explorerScroll.BorderSizePixel = 0
-CFG.explorerScroll.ScrollBarThickness = 5
-CFG.explorerScroll.ScrollBarImageColor3 = Themes[State.CurrentTheme].Accent
-CFG.explorerScroll.CanvasSize = UDim2.new(0,0,0,0)
-CFG.explorerScroll.ZIndex = 13; CFG.explorerScroll.Parent = CFG.explorer
-CFG.explorerList = Instance.new("UIListLayout")
-CFG.explorerList.Padding = UDim.new(0,6)
-CFG.explorerList.SortOrder = Enum.SortOrder.LayoutOrder
-CFG.explorerList.Parent = CFG.explorerScroll
-addConnection(CFG.explorerList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-	CFG.explorerScroll.CanvasSize = UDim2.new(0,0,0, CFG.explorerList.AbsoluteContentSize.Y + 10)
-end))
-
-CFG.load = Instance.new("TextButton")
-CFG.load.Size = UDim2.new(0.48,0,0,40); CFG.load.Position = UDim2.new(0,20,0,425)
-CFG.load.BackgroundColor3 = Themes[State.CurrentTheme].Card
-CFG.load.BackgroundTransparency = 0.3
-CFG.load.Text = "Загрузить выбранный"; CFG.load.Font = FONT_MAIN; CFG.load.TextSize = 15
-CFG.load.TextColor3 = Themes[State.CurrentTheme].Text
-CFG.load.AutoButtonColor = false; CFG.load.ZIndex = 12; CFG.load.Parent = UI.configs
-local lc = Instance.new("UICorner"); lc.CornerRadius = UDim.new(0,8); lc.Parent = CFG.load
-
-CFG.delete = Instance.new("TextButton")
-CFG.delete.Size = UDim2.new(0.48,0,0,40); CFG.delete.Position = UDim2.new(0.52,0,0,425)
-CFG.delete.BackgroundColor3 = Themes[State.CurrentTheme].Card
-CFG.delete.BackgroundTransparency = 0.3
-CFG.delete.Text = "Удалить выбранный"; CFG.delete.Font = FONT_MAIN; CFG.delete.TextSize = 15
-CFG.delete.TextColor3 = Themes[State.CurrentTheme].Text
-CFG.delete.AutoButtonColor = false; CFG.delete.ZIndex = 12; CFG.delete.Parent = UI.configs
-local dc = Instance.new("UICorner"); dc.CornerRadius = UDim.new(0,8); dc.Parent = CFG.delete
-
-CFG.path = Instance.new("TextLabel")
-CFG.path.Text = "Путь: " .. getAbsoluteConfigPath()
-CFG.path.Font = FONT_TEXT; CFG.path.TextSize = 12
-CFG.path.TextColor3 = Themes[State.CurrentTheme].Text
-CFG.path.TextTransparency = 0.3
-CFG.path.Size = UDim2.new(1,-40,0,20); CFG.path.Position = UDim2.new(0,20,0,472)
-CFG.path.TextXAlignment = Enum.TextXAlignment.Left
-CFG.path.BackgroundTransparency = 1; CFG.path.ZIndex = 12; CFG.path.Parent = UI.configs
-
-CFG.status = Instance.new("TextLabel")
-CFG.status.Text = ""; CFG.status.Font = FONT_TEXT; CFG.status.TextSize = 13
-CFG.status.TextColor3 = Themes[State.CurrentTheme].Accent
-CFG.status.Size = UDim2.new(1,-40,0,20); CFG.status.Position = UDim2.new(0,20,0,495)
-CFG.status.TextXAlignment = Enum.TextXAlignment.Left
-CFG.status.BackgroundTransparency = 1; CFG.status.ZIndex = 12; CFG.status.Parent = UI.configs
-
-local function showStatus(msg, isError)
-	CFG.status.Text = msg
-	CFG.status.TextColor3 = isError and Color3.fromRGB(255,100,100) or Themes[State.CurrentTheme].Accent
-	CFG.status.TextTransparency = 0
-	TweenService:Create(CFG.status, TweenInfo.new(3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {TextTransparency = 1}):Play()
-end
-
--- ================= FILE EXPLORER =================
-local configEntries = {}
-local function getFileName(p) return p:match("[^/\\]+$") or p end
-
--- ================= SAVE NAME WINDOW =================
-local SaveW = {}
-SaveW.frame = Instance.new("Frame")
-SaveW.frame.Name = "SaveNameWindow"
-SaveW.frame.Size = UDim2.new(0,400,0,220)
-SaveW.frame.Position = UDim2.new(0.5,-200,0.5,-110)
-SaveW.frame.BackgroundColor3 = Themes[State.CurrentTheme].Bg
-SaveW.frame.BackgroundTransparency = 0.2
-SaveW.frame.BorderSizePixel = 0
-SaveW.frame.Visible = false
-SaveW.frame.ZIndex = 700
-SaveW.frame.Parent = screenGui
-SaveW.corner = Instance.new("UICorner"); SaveW.corner.CornerRadius = UDim.new(0,12); SaveW.corner.Parent = SaveW.frame
-SaveW.stroke = Instance.new("UIStroke")
-SaveW.stroke.Color = Themes[State.CurrentTheme].Stroke
-SaveW.stroke.Transparency = 0.3; SaveW.stroke.Parent = SaveW.frame
-
-SaveW.title = Instance.new("TextLabel")
-SaveW.title.Text = "Название конфига"; SaveW.title.Font = FONT_MAIN; SaveW.title.TextSize = 18
-SaveW.title.TextColor3 = Themes[State.CurrentTheme].Text
-SaveW.title.Size = UDim2.new(1,-40,0,30); SaveW.title.Position = UDim2.new(0,20,0,15)
-SaveW.title.TextXAlignment = Enum.TextXAlignment.Left
-SaveW.title.BackgroundTransparency = 1; SaveW.title.ZIndex = 701; SaveW.title.Parent = SaveW.frame
-
-SaveW.input = Instance.new("TextBox")
-SaveW.input.Size = UDim2.new(1,-40,0,44); SaveW.input.Position = UDim2.new(0,20,0,60)
-SaveW.input.BackgroundColor3 = Themes[State.CurrentTheme].Card
-SaveW.input.BackgroundTransparency = 0.3
-SaveW.input.BorderSizePixel = 0; SaveW.input.Font = FONT_TEXT; SaveW.input.TextSize = 16
-SaveW.input.TextColor3 = Themes[State.CurrentTheme].Text
-SaveW.input.PlaceholderText = "Например: MyConfig"
-SaveW.input.PlaceholderColor3 = Themes[State.CurrentTheme].Text
-SaveW.input.Text = ""; SaveW.input.ClearTextOnFocus = false
-SaveW.input.ZIndex = 701; SaveW.input.Parent = SaveW.frame
-SaveW.inputCorner = Instance.new("UICorner"); SaveW.inputCorner.CornerRadius = UDim.new(0,8); SaveW.inputCorner.Parent = SaveW.input
-SaveW.inputStroke = Instance.new("UIStroke")
-SaveW.inputStroke.Color = Themes[State.CurrentTheme].Stroke
-SaveW.inputStroke.Transparency = 0.5; SaveW.inputStroke.Parent = SaveW.input
-
-local saveBtnRow = Instance.new("Frame")
-saveBtnRow.Size = UDim2.new(1, -40, 0, 40)
-saveBtnRow.Position = UDim2.new(0, 20, 0, 160)
-saveBtnRow.BackgroundTransparency = 1
-saveBtnRow.ZIndex = 701
-saveBtnRow.Parent = SaveW.frame
-
-local saveBtnLayout = Instance.new("UIListLayout")
-saveBtnLayout.FillDirection = Enum.FillDirection.Horizontal
-saveBtnLayout.Padding = UDim.new(0, 12)
-saveBtnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-saveBtnLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-saveBtnLayout.SortOrder = Enum.SortOrder.LayoutOrder
-saveBtnLayout.Parent = saveBtnRow
-
-SaveW.cancel = Instance.new("TextButton")
-SaveW.cancel.Size = UDim2.new(0, 160, 0, 40)
-SaveW.cancel.BackgroundColor3 = Themes[State.CurrentTheme].Card
-SaveW.cancel.BackgroundTransparency = 0.3
-SaveW.cancel.Text = "Назад"; SaveW.cancel.Font = FONT_MAIN; SaveW.cancel.TextSize = 15
-SaveW.cancel.TextColor3 = Themes[State.CurrentTheme].Text
-SaveW.cancel.AutoButtonColor = false
-SaveW.cancel.LayoutOrder = 1
-SaveW.cancel.ZIndex = 701; SaveW.cancel.Parent = saveBtnRow
-SaveW.cancelCorner = Instance.new("UICorner"); SaveW.cancelCorner.CornerRadius = UDim.new(0,8); SaveW.cancelCorner.Parent = SaveW.cancel
-
-SaveW.ok = Instance.new("TextButton")
-SaveW.ok.Size = UDim2.new(0, 160, 0, 40)
-SaveW.ok.BackgroundColor3 = Themes[State.CurrentTheme].Accent
-SaveW.ok.BackgroundTransparency = 0.3
-SaveW.ok.Text = "OK"; SaveW.ok.Font = FONT_MAIN; SaveW.ok.TextSize = 15
-SaveW.ok.TextColor3 = Themes[State.CurrentTheme].Bg
-SaveW.ok.AutoButtonColor = false
-SaveW.ok.LayoutOrder = 2
-SaveW.ok.ZIndex = 701; SaveW.ok.Parent = saveBtnRow
-SaveW.okCorner = Instance.new("UICorner"); SaveW.okCorner.CornerRadius = UDim.new(0,8); SaveW.okCorner.Parent = SaveW.ok
-
-local function openSaveName()
-	SaveW.input.Text = ""
-	SaveW.frame.Visible = true
-	SaveW.frame.Size = UDim2.new(0,0,0,0)
-	SaveW.frame.Position = UDim2.new(0.5,0,0.5,0)
-	TweenService:Create(SaveW.frame, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-		Size = UDim2.new(0,400,0,220), Position = UDim2.new(0.5,-200,0.5,-110)
-	}):Play()
-end
-local function closeSaveName()
-	TweenService:Create(SaveW.frame, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
-		Size = UDim2.new(0,0,0,0), Position = UDim2.new(0.5,0,0.5,0)
-	}):Play()
-	task.delay(0.25, function() SaveW.frame.Visible = false end)
-end
-
-addConnection(SaveW.cancel.MouseButton1Click:Connect(function()
-	playSound(SFX.Off); closeSaveName()
-end))
-addConnection(SaveW.ok.MouseButton1Click:Connect(function()
-	if ScriptUnloaded then return end
-	local n = SaveW.input.Text:gsub("[^%w_%-%s]", ""):gsub("%s+", "_")
-	if n == "" then showStatus("Введи название", true); return end
-	ensureConfigFolder()
-	local full = CONFIG_FOLDER.."/"..n..".json"
-	local ok, err = safeWriteFile(full, serializeConfig())
-	if ok then
-		showStatus("Сохранено: "..n..".json", false)
-		playSound(SFX.On)
-		closeSaveName()
-		task.wait(0.3)
-		refreshExplorer()
-	else
-		showStatus("Ошибка: "..tostring(err), true)
-	end
-end))
-
--- ================= EXPLORER FUNC =================
--- [FIX 4] Присваиваем в forward-declared local
-refreshExplorer = function()
-	for _, child in ipairs(CFG.explorerScroll:GetChildren()) do
-		if child:IsA("TextButton") or child:IsA("TextLabel") then child:Destroy() end
-	end
-	configEntries = {}
-
-	if not hasFileAPI() or not hasListAPI() then
-		local w = Instance.new("TextLabel")
-		w.Text = "Файловый API недоступен. Нужен executor с writefile/readfile/listfiles."
-		w.Font = FONT_TEXT; w.TextSize = 13
-		w.TextColor3 = Color3.fromRGB(255,100,100)
-		w.Size = UDim2.new(1,-20,0,40); w.Position = UDim2.new(0,10,0,10)
-		w.TextWrapped = true; w.BackgroundTransparency = 1; w.ZIndex = 14
-		w.Parent = CFG.explorerScroll
-		return
-	end
-
-	local files = safeListFiles(CONFIG_FOLDER)
-	local jsonFiles = {}
-	for _, f in ipairs(files) do
-		if type(isfile) == "function" then
-			local ok, isf = pcall(isfile, f)
-			if ok and isf and f:lower():match("%.json$") then table.insert(jsonFiles, f) end
-		else
-			if f:lower():match("%.json$") then table.insert(jsonFiles, f) end
-		end
-	end
-
-	if #jsonFiles == 0 then
-		local e = Instance.new("TextLabel")
-		e.Text = "Папка пуста. Нажми 'Сохранить конфиг'."
-		e.Font = FONT_TEXT; e.TextSize = 13
-		e.TextColor3 = Themes[State.CurrentTheme].Text
-		e.TextTransparency = 0.4
-		e.Size = UDim2.new(1,-20,0,40); e.Position = UDim2.new(0,10,0,10)
-		e.TextWrapped = true; e.BackgroundTransparency = 1; e.ZIndex = 14
-		e.Parent = CFG.explorerScroll
-		return
-	end
-
-	for _, path in ipairs(jsonFiles) do
-		local fn = getFileName(path)
-		local entry = Instance.new("TextButton")
-		entry.Name = "Entry_"..fn
-		entry.Size = UDim2.new(1,-10,0,34)
-		entry.BackgroundColor3 = Themes[State.CurrentTheme].Bg
-		entry.BackgroundTransparency = 0.6
-		entry.Text = ""; entry.AutoButtonColor = false
-		entry.ZIndex = 13; entry.Parent = CFG.explorerScroll
-		local ec2 = Instance.new("UICorner"); ec2.CornerRadius = UDim.new(0,6); ec2.Parent = entry
-
-		local ico = Instance.new("TextLabel")
-		ico.Text = "📄"; ico.Font = FONT_TEXT; ico.TextSize = 16
-		ico.TextColor3 = Themes[State.CurrentTheme].Text
-		ico.Size = UDim2.new(0,28,1,0); ico.Position = UDim2.new(0,8,0,0)
-		ico.BackgroundTransparency = 1; ico.ZIndex = 14; ico.Parent = entry
-
-		local nl = Instance.new("TextLabel")
-		nl.Text = fn; nl.Font = FONT_TEXT; nl.TextSize = 14
-		nl.TextColor3 = Themes[State.CurrentTheme].Text
-		nl.Size = UDim2.new(1,-50,1,0); nl.Position = UDim2.new(0,38,0,0)
-		nl.TextXAlignment = Enum.TextXAlignment.Left
-		nl.BackgroundTransparency = 1; nl.ZIndex = 14; nl.Parent = entry
-
-		entry:SetAttribute("Path", path)
-		entry:SetAttribute("FileName", fn)
-		table.insert(configEntries, {entry = entry, path = path, fileName = fn})
-
-		addConnection(entry.MouseButton1Click:Connect(function()
-			if ScriptUnloaded then return end
-			for _, e in ipairs(configEntries) do
-				if e.entry and e.entry.Parent then
-					TweenService:Create(e.entry, TweenInfo.new(0.15), {BackgroundTransparency = 0.6, BackgroundColor3 = Themes[State.CurrentTheme].Bg}):Play()
-				end
-			end
-			State.SelectedConfig = path
-			TweenService:Create(entry, TweenInfo.new(0.15), {BackgroundTransparency = 0.2, BackgroundColor3 = Themes[State.CurrentTheme].Accent}):Play()
-			playSound(SFX.On)
-		end))
-	end
-end
-
--- ================= APPLY ALL =================
-local function applyAllFromState()
-	applyFog(); applySky(); applyFullbright(); applyWorld()
-	applyParticles(); applyTrails(); applyChinaHat(); applyWings(); applyKagune()
-	HUD.frame.Visible = State.HudEnabled
-	if State.HudEnabled then
-		HUD.frame.Size = UDim2.new(0,280,0,38)
-		HUD.frame.Position = UDim2.new(0.5,-140,0,15)
-	end
-	if State.JumpCircleEnabled then setupJumpCircle() end
-	applyThemeToUI(State.CurrentTheme)
-	syncVisualCards()
-end
-
--- ================= CONFIG BUTTONS =================
-addConnection(CFG.save.MouseButton1Click:Connect(function()
-	if ScriptUnloaded then return end
-	playSound(SFX.On); openSaveName()
-end))
-addConnection(CFG.refresh.MouseButton1Click:Connect(function()
-	if ScriptUnloaded then return end
-	playSound(SFX.On); refreshExplorer(); showStatus("Список обновлён", false)
-end))
-addConnection(CFG.importBtn.MouseButton1Click:Connect(function()
-	if ScriptUnloaded then return end
-	playSound(SFX.On)
-	local path = getAbsoluteConfigPath()
-	local ok = safeSetClipboard(path)
-	if ok then showStatus("Путь скопирован: "..path, false)
-	else showStatus("Не удалось скопировать", true) end
-end))
-addConnection(CFG.load.MouseButton1Click:Connect(function()
-	if ScriptUnloaded then return end
-	if not State.SelectedConfig then showStatus("Выбери конфиг в списке", true); return end
-	local d = safeReadFile(State.SelectedConfig)
-	if not d or d == "" then showStatus("Не удалось прочитать", true); return end
-	if deserializeConfig(d) then
-		applyAllFromState()
-		showStatus("Загружено: "..getFileName(State.SelectedConfig), false)
-		playSound(SFX.On)
-	else
-		showStatus("Неверный формат", true)
-	end
-end))
-addConnection(CFG.delete.MouseButton1Click:Connect(function()
-	if ScriptUnloaded then return end
-	if not State.SelectedConfig then showStatus("Выбери конфиг", true); return end
-	local ok, err = safeDeleteFile(State.SelectedConfig)
-	if ok then
-		showStatus("Удалено: "..getFileName(State.SelectedConfig), false)
-		State.SelectedConfig = nil
-		playSound(SFX.Off)
-		task.wait(0.3)
-		refreshExplorer()
-	else
-		showStatus("Ошибка: "..tostring(err), true)
-	end
-end))
-
--- ================= TABS =================
-local tabButtons = {UI.btnVisuals, UI.btnThemes, UI.btnConfigs}
-local tabInds = {UI.indVisuals, UI.indThemes, UI.indConfigs}
-local tabTexts = {UI.txtVisuals, UI.txtThemes, UI.txtConfigs}
-local tabFrames = {UI.visuals, UI.themes, UI.configs}
-
-local function selectTab(idx)
-	for i, b in ipairs(tabButtons) do
-		b:SetAttribute("Selected", false)
-		TweenService:Create(b, TweenInfo.new(0.2), {BackgroundTransparency = 1}):Play()
-		TweenService:Create(tabTexts[i], TweenInfo.new(0.2), {TextColor3 = STYLE.TextDim}):Play()
-		TweenService:Create(tabInds[i], TweenInfo.new(0.2), {BackgroundTransparency = 1}):Play()
-	end
-	local sb = tabButtons[idx]
-	sb:SetAttribute("Selected", true)
-	TweenService:Create(sb, TweenInfo.new(0.2), {BackgroundTransparency = 0.85}):Play()
-	TweenService:Create(tabTexts[idx], TweenInfo.new(0.2), {TextColor3 = Themes[State.CurrentTheme].Text}):Play()
-	TweenService:Create(tabInds[idx], TweenInfo.new(0.2), {BackgroundTransparency = 0}):Play()
-	for _, f in ipairs(tabFrames) do f.Visible = false end
-	tabFrames[idx].Visible = true
-	if idx == 3 then refreshExplorer() end
-end
-
-addConnection(UI.btnVisuals.MouseButton1Click:Connect(function() if not ScriptUnloaded then selectTab(1) end end))
-addConnection(UI.btnThemes.MouseButton1Click:Connect(function() if not ScriptUnloaded then selectTab(2) end end))
-addConnection(UI.btnConfigs.MouseButton1Click:Connect(function() if not ScriptUnloaded then selectTab(3) end end))
-selectTab(1)
-
--- ================= TOGGLE MENU =================
-local function toggleMenu()
-	if ScriptUnloaded then return end
-	State.MenuOpen = not State.MenuOpen
-	if State.MenuOpen then
-		playSound(SFX.MenuOpen)
-		Bubble.frame.Size = UDim2.new(0,10,0,10)
-		Bubble.frame.Position = UDim2.new(0.5,-5,0.5,-5)
-		Bubble.stroke.Transparency = 0.5
-		Bubble.frame.BackgroundTransparency = 0.8
-		TweenService:Create(Bubble.frame, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-			Size = UDim2.new(0,1000,0,1000), Position = UDim2.new(0.5,-500,0.5,-500),
-			BackgroundTransparency = 1
-		}):Play()
-		TweenService:Create(Bubble.stroke, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-			Transparency = 1, Thickness = 0
-		}):Play()
-		UI.main.Visible = true
-		UI.main.Size = UDim2.new(0,0,0,0)
-		UI.main.Position = UDim2.new(0.5,0,0.5,0)
-		TweenService:Create(UI.main, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-			Size = UDim2.new(0,980,0,640), Position = UDim2.new(0.5,-490,0.5,-320)
-		}):Play()
-		TweenService:Create(blur, TweenInfo.new(0.5, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Size = 24}):Play()
-		dimOverlay.Visible = true
-		dimOverlay.BackgroundTransparency = 1
-		TweenService:Create(dimOverlay, TweenInfo.new(0.5), {BackgroundTransparency = 0.5}):Play()
-	else
-		playSound(SFX.MenuClose)
-		TweenService:Create(UI.main, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
-			Size = UDim2.new(0,0,0,0), Position = UDim2.new(0.5,0,0.5,0)
-		}):Play()
-		TweenService:Create(blur, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {Size = 0}):Play()
-		TweenService:Create(dimOverlay, TweenInfo.new(0.3), {BackgroundTransparency = 1}):Play()
-		for _, w in pairs(WINS) do if w.frame then w.frame.Visible = false end end
-		SaveW.frame.Visible = false
-		State.OpenSettings = nil
-		task.wait(0.35)
-		if not ScriptUnloaded then
-			UI.main.Visible = false
-			dimOverlay.Visible = false
-		end
-	end
-end
-
-addConnection(UserInputService.InputBegan:Connect(function(input, gp)
-	if ScriptUnloaded or gp then return end
-	if input.KeyCode == Enum.KeyCode.RightShift then toggleMenu() end
-end))
-
-local dragH = Instance.new("Frame")
-dragH.Size = UDim2.new(1,0,0,45)
-dragH.BackgroundTransparency = 1
-dragH.ZIndex = 15
-dragH.Parent = UI.main
-makeDraggable(UI.main, dragH)
-
--- ================= AUTOLOAD =================
-task.spawn(function()
-	task.wait(1)
-	ensureConfigFolder()
-	local d = safeReadFile(CONFIG_FOLDER.."/autoload.json")
-	if d and d ~= "" then
-		if deserializeConfig(d) then
-			applyAllFromState()
-			print("Kimiko: автозагружен autoload.json")
-		end
-	end
-end)
-
-print("Kimiko Visuals v51 loaded.")
-print("Путь к конфигам: "..getAbsoluteConfigPath())
+setOpen(true)
