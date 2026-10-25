@@ -1,0 +1,1613 @@
+-- ===================== VIOLET VISUALS v5 =====================
+local Players=game:GetService('Players')
+local UIS=game:GetService('UserInputService')
+local TweenService=game:GetService('TweenService')
+local Lighting=game:GetService('Lighting')
+local RunService=game:GetService('RunService')
+local player=Players.LocalPlayer
+local parent=player:WaitForChild('PlayerGui')
+
+-- === cleanup previous run ===
+pcall(function() if _G.VV_Cleanup then _G.VV_Cleanup() end end)
+local function restoreAll(ch)
+    if not ch then return end
+    for _,d in ipairs(ch:GetDescendants()) do
+        local t=d:GetAttribute('VV_T')
+        if t~=nil then d.Transparency=t; d:SetAttribute('VV_T',nil) end
+    end
+end
+restoreAll(player.Character)
+local old=parent:FindFirstChild('VioletVisualsGUI'); if old then old:Destroy() end
+for _,o in ipairs(workspace:GetChildren()) do
+    if o:IsA('Model') and o.Name:sub(1,3)=='VV_' then o:Destroy() end
+end
+
+local conns={}
+local function track(c) conns[#conns+1]=c; return c end
+
+-- === palette & helpers ===
+local function RGB(r,g,b) return Color3.fromRGB(r,g,b) end
+local C={
+    bg=RGB(15,14,22),panel=RGB(30,28,42),field=RGB(40,38,55),fieldHi=RGB(52,49,68),
+    line=RGB(70,65,85),white=RGB(240,238,250),muted=RGB(155,150,175),
+    accent=RGB(160,115,255),accent2=RGB(255,115,185),danger=RGB(245,95,120),
+    panelGlass=RGB(35,32,48),soft=RGB(55,52,70),gold=RGB(255,210,100),
+}
+local function new(t,p,par)
+    local o=Instance.new(t)
+    for k,v in pairs(p or {}) do
+        local ok,err=pcall(function() o[k]=v end)
+        if not ok then warn('[VioletVisuals] '..t..'.'..tostring(k)..' -> '..tostring(err)) end
+    end
+    o.Parent=par
+    return o
+end
+local function corner(o,r) new('UICorner',{CornerRadius=UDim.new(0,r or 9)},o) end
+local function stroke(o,c,t) new('UIStroke',{Color=c or C.line,Thickness=t or 1},o) end
+local function label(par,text,size,bold,color)
+    return new('TextLabel',{
+        BackgroundTransparency=1,Text=text,
+        Font=bold and Enum.Font.GothamBold or Enum.Font.Gotham,
+        TextSize=size or 13,TextColor3=color or C.white,
+        TextXAlignment=Enum.TextXAlignment.Left,TextWrapped=true
+    },par)
+end
+local function gradient(o,c1,c2,rot)
+    return new('UIGradient',{Color=ColorSequence.new(c1,c2),Rotation=rot or 90},o)
+end
+local deb={}
+local function debounce(key,fn,delay)
+    deb[key]=(deb[key] or 0)+1
+    local my=deb[key]
+    task.delay(delay or .3,function() if deb[key]==my then fn() end end)
+end
+
+local PALETTE={
+    {'Crimson',RGB(225,25,50)},{'Violet',RGB(155,95,255)},{'Azure',RGB(70,165,255)},
+    {'Emerald',RGB(45,225,145)},{'Gold',RGB(255,200,70)},{'White',RGB(240,240,255)},{'Pink',RGB(255,110,190)},
+}
+local PALNAMES={}
+for i,p in ipairs(PALETTE) do PALNAMES[i]=p[1] end
+local TINTS={
+    {'None',Color3.new(1,1,1)},{'Purple',RGB(225,205,255)},{'Warm',RGB(255,225,195)},{'Cold',RGB(200,225,255)},
+    {'Neon',RGB(255,120,255)},{'Rose',RGB(255,205,225)},{'Emerald',RGB(200,255,225)},{'Cyber',RGB(210,190,255)},
+}
+local TINTNAMES={}
+for i,p in ipairs(TINTS) do TINTNAMES[i]=p[1] end
+local FOGCOLS={
+    {'Фиолетовый',RGB(60,35,100)},{'Серый',RGB(150,155,165)},{'Белый',RGB(235,238,245)},
+    {'Розовый',RGB(255,150,200)},{'Синий',RGB(60,100,190)},{'Красный',RGB(110,15,30)},{'Чёрный',RGB(8,8,12)},
+}
+local FOGNAMES={}
+for i,p in ipairs(FOGCOLS) do FOGNAMES[i]=p[1] end
+
+-- === state ===
+local S={
+    bloom=false,bloomI=40,bloomSize=35,bloomThr=60,
+    color=false,sat=50,con=50,bri=50,tintIdx=1,
+    rays=false,raysI=40,raysSpread=80,
+    dof=false,dofF=40,dofR=30,dofFar=15,
+    blur=false,blurS=20,
+    style=1,rich=false,refl=60,diff=100,expo=50,glassStyle=true,
+    skyEnabled=false,skyChoice='Violet Night',skyStars=1800,skyMoon=true,sunSize=11,moonSize=11,
+    skyboxOn=false,skybox={Bk='',Dn='',Ft='',Lf='',Rt='',Up=''},skyAll='',
+    fogOn=false,fogStart=0,fogEnd=800,fogDensity=35,fogHaze=12,fogColor=1,
+    timeOn=false,time=14,
+    night=false,full=false,amb=false,
+    cosmetics={},cosColor=1,kn=4,kLen=100,kSpd=50,dust=14,
+    item=nil,
+}
+
+-- === original lighting snapshot ===
+local function getL(p) local ok,v=pcall(function() return Lighting[p] end); if ok then return v end end
+local function setL(p,v) if v~=nil then pcall(function() Lighting[p]=v end) end end
+local ORIG={}
+for _,p in ipairs({'ClockTime','Brightness','Ambient','OutdoorAmbient','FogColor','FogStart','FogEnd',
+    'ExposureCompensation','EnvironmentDiffuseScale','EnvironmentSpecularScale','ShadowSoftness'}) do
+    ORIG[p]=getL(p)
+end
+
+-- === effects ===
+local function mkEffect(class,name,props)
+    local o=Lighting:FindFirstChild(name) or Instance.new(class)
+    o.Name=name
+    for k,v in pairs(props) do pcall(function() o[k]=v end) end
+    o.Enabled=false
+    o.Parent=Lighting
+    return o
+end
+local bloom=mkEffect('BloomEffect','VV_Bloom',{Intensity=.8,Size=35,Threshold=1.2})
+local colorFx=mkEffect('ColorCorrectionEffect','VV_Color',{Saturation=.2,Contrast=.12,TintColor=RGB(235,220,255)})
+local rays=mkEffect('SunRaysEffect','VV_Rays',{Intensity=.12,Spread=.8})
+local dof=mkEffect('DepthOfFieldEffect','VV_DOF',{FarIntensity=.15,FocusDistance=40,InFocusRadius=30,NearIntensity=.3})
+local blur=mkEffect('BlurEffect','VV_Blur',{Size=6})
+
+local build -- forward declaration (UI rebuild)
+
+local function applyShaders()
+    bloom.Enabled=S.bloom; bloom.Intensity=S.bloomI/50; bloom.Size=S.bloomSize; bloom.Threshold=S.bloomThr/50
+    colorFx.Enabled=S.color; colorFx.Saturation=(S.sat-50)/50; colorFx.Contrast=(S.con-50)/100
+    colorFx.Brightness=(S.bri-50)/200; colorFx.TintColor=TINTS[S.tintIdx][2]
+    rays.Enabled=S.rays; rays.Intensity=S.raysI/200; rays.Spread=S.raysSpread/100
+    dof.Enabled=S.dof; dof.FocusDistance=S.dofF*2; dof.InFocusRadius=S.dofR; dof.FarIntensity=S.dofFar/100
+    blur.Enabled=S.blur; blur.Size=S.blurS/4
+end
+
+local presets={
+    Default={},
+    Cinematic={b=30,sat=45,con=62,bri=48,tint=3,d=25},
+    Vivid={b=45,sat=78,con=58,bri=50,r=30},
+    Noir={b=20,sat=0,con=72,bri=46},
+    Dreamy={b=80,sat=62,con=45,bri=56,tint=6,r=50,d=30},
+    Cyberpunk={b=70,sat=82,con=64,bri=47,tint=8,r=20},
+    Warm={b=30,sat=58,con=55,bri=52,tint=3},
+    Cold={b=25,sat=55,con=55,bri=50,tint=4},
+    Purple={b=40,sat=60,con=55,bri=50,tint=2,r=25},
+    Nebula={b=75,sat=72,con=60,bri=46,tint=5,r=15,d=20},
+}
+local presetNames={'Default','Cinematic','Vivid','Noir','Dreamy','Cyberpunk','Warm','Cold','Purple','Nebula'}
+local function applyPreset(name,idx)
+    local p=presets[name] or {}
+    S.style=idx
+    S.bloom=(p.b or 0)>0; S.bloomI=p.b or 40
+    S.color=p.sat~=nil; S.sat=p.sat or 50; S.con=p.con or 50; S.bri=p.bri or 50; S.tintIdx=p.tint or 1
+    S.rays=(p.r or 0)>0; S.raysI=p.r or 40
+    S.dof=(p.d or 0)>0; S.dofF=40
+    applyShaders(); build()
+end
+
+local function applyLighting()
+    if S.rich then
+        setL('EnvironmentDiffuseScale',S.diff/100); setL('EnvironmentSpecularScale',S.refl/100)
+        setL('ShadowSoftness',.15); setL('ExposureCompensation',(S.expo-50)/25)
+    else
+        setL('EnvironmentDiffuseScale',ORIG.EnvironmentDiffuseScale)
+        setL('EnvironmentSpecularScale',ORIG.EnvironmentSpecularScale)
+        setL('ShadowSoftness',ORIG.ShadowSoftness)
+    end
+end
+
+-- === sky / fog / skybox ===
+local function findOriginal(class)
+    for _,v in ipairs(Lighting:GetChildren()) do
+        if v:IsA(class) and v.Name:sub(1,3)~='VV_' then return v end
+    end
+end
+local skyBackup=findOriginal('Sky'); skyBackup=skyBackup and skyBackup:Clone()
+local atmBackup=findOriginal('Atmosphere'); atmBackup=atmBackup and atmBackup:Clone()
+
+local skyPresets={
+    ['Violet Night']={clock=0,ambient=RGB(72,48,116),outdoor=RGB(95,72,145),fog=RGB(43,27,75),density=.3,haze=1.3,glare=.1,exposure=-.12},
+    ['Deep Space']={clock=0,ambient=RGB(25,25,65),outdoor=RGB(42,42,88),fog=RGB(9,9,29),density=.12,haze=.2,glare=0,exposure=-.3},
+    ['Nebula Space']={clock=0,ambient=RGB(110,45,140),outdoor=RGB(140,70,170),fog=RGB(60,15,80),density=.22,haze=.8,glare=.1,exposure=-.2},
+    ['Cosmic Purple']={clock=0,ambient=RGB(65,35,110),outdoor=RGB(90,55,150),fog=RGB(35,20,75),density=.25,haze=.95,glare=.12,exposure=-.18},
+    ['Aurora Borealis']={clock=3,ambient=RGB(40,70,120),outdoor=RGB(70,120,160),fog=RGB(35,55,95),density=.32,haze=1.5,glare=.2,exposure=-.05},
+    ['Crimson Dusk']={clock=19,ambient=RGB(120,40,50),outdoor=RGB(180,70,75),fog=RGB(95,30,35),density=.38,haze=1.1,glare=.35,exposure=-.02},
+    ['Sunset']={clock=18.3,ambient=RGB(185,99,91),outdoor=RGB(220,145,98),fog=RGB(236,130,104),density=.35,haze=2,glare=.4,exposure=.05},
+    ['Golden Hour']={clock=17,ambient=RGB(185,150,98),outdoor=RGB(255,192,123),fog=RGB(255,197,135),density=.27,haze=1.4,glare=.3,exposure=.1},
+    ['Arctic Blue']={clock=12,ambient=RGB(128,171,205),outdoor=RGB(170,210,245),fog=RGB(175,220,255),density=.38,haze=1.2,glare=.15,exposure=.08},
+    ['Pink Dream']={clock=7,ambient=RGB(205,133,177),outdoor=RGB(250,180,212),fog=RGB(255,171,210),density=.34,haze=1.6,glare=.15,exposure=.07},
+    ['Dark Red']={clock=0,ambient=RGB(92,25,38),outdoor=RGB(135,37,45),fog=RGB(70,10,22),density=.33,haze=1.2,glare=.05,exposure=-.15},
+    ['Emerald']={clock=1,ambient=RGB(38,110,88),outdoor=RGB(58,155,122),fog=RGB(18,73,62),density=.3,haze=1.4,glare=.08,exposure=-.08},
+    ['Cloudy Gray']={clock=11,ambient=RGB(115,122,135),outdoor=RGB(152,161,174),fog=RGB(160,165,178),density=.48,haze=2.5,glare=0,exposure=-.12},
+    ['Cyber Pink']={clock=0,ambient=RGB(160,60,140),outdoor=RGB(200,90,170),fog=RGB(70,20,80),density=.4,haze=1.8,glare=.2,exposure=-.05},
+    ['Solar Eclipse']={clock=0,ambient=RGB(80,40,70),outdoor=RGB(120,60,100),fog=RGB(25,10,35),density=.42,haze=1.8,glare=.03,exposure=-.25},
+    ['Blood Moon']={clock=23,ambient=RGB(75,15,30),outdoor=RGB(130,30,45),fog=RGB(70,10,20),density=.36,haze=1.3,glare=.1,exposure=-.08},
+}
+local skyOrder={'Violet Night','Deep Space','Nebula Space','Cosmic Purple','Aurora Borealis','Crimson Dusk','Sunset','Golden Hour','Arctic Blue','Pink Dream','Dark Red','Emerald','Cloudy Gray','Cyber Pink','Solar Eclipse','Blood Moon'}
+local SKYFACES={
+    Bk='rbxasset://textures/sky/sky512_bk.tex',Dn='rbxasset://textures/sky/sky512_dn.tex',
+    Ft='rbxasset://textures/sky/sky512_ft.tex',Lf='rbxasset://textures/sky/sky512_lf.tex',
+    Rt='rbxasset://textures/sky/sky512_rt.tex',Up='rbxasset://textures/sky/sky512_up.tex',
+}
+local function assetUrl(s)
+    s=(tostring(s or '')):gsub('%s','')
+    if s=='' then return nil end
+    if s:match('^%d+$') then return 'rbxassetid://'..s end
+    return s
+end
+local function ensureLight(class,name)
+    local o=Lighting:FindFirstChild(name)
+    if o and not o:IsA(class) then o:Destroy(); o=nil end
+    if not o then o=Instance.new(class); o.Name=name; o.Parent=Lighting end
+    return o
+end
+local function setProps(o,t) for k,v in pairs(t) do pcall(function() o[k]=v end) end end
+local function dropOriginals(class)
+    for _,v in ipairs(Lighting:GetChildren()) do
+        if v:IsA(class) and v.Name:sub(1,3)~='VV_' then v:Destroy() end
+    end
+end
+local function restoreOriginal(class,backup)
+    if not backup then return end
+    for _,v in ipairs(Lighting:GetChildren()) do
+        if v:IsA(class) and v.Name:sub(1,3)~='VV_' then return end
+    end
+    backup:Clone().Parent=Lighting
+end
+
+local worldDirty=false
+local function applyWorld()
+    local anyOn=S.skyEnabled or S.skyboxOn or S.fogOn or S.timeOn or S.night or S.full or S.amb or S.rich
+    if anyOn or worldDirty then
+        for k,v in pairs(ORIG) do
+            if k~='EnvironmentDiffuseScale' and k~='EnvironmentSpecularScale' and k~='ShadowSoftness' then setL(k,v) end
+        end
+    end
+    worldDirty=anyOn
+    local fc=FOGCOLS[S.fogColor][2]
+    local p=S.skyEnabled and (skyPresets[S.skyChoice] or skyPresets['Violet Night']) or nil
+    if S.skyEnabled or S.skyboxOn then
+        dropOriginals('Sky')
+        local sky=ensureLight('Sky','VV_Sky')
+        local props={
+            StarCount=math.clamp(S.skyStars,0,5000),CelestialBodiesShown=S.skyMoon,
+            SunAngularSize=S.skyMoon and S.sunSize or 0,MoonAngularSize=S.skyMoon and S.moonSize or 0,
+        }
+        for face,def in pairs(SKYFACES) do
+            props['Skybox'..face]=(S.skyboxOn and assetUrl(S.skybox[face])) or def
+        end
+        setProps(sky,props)
+    else
+        local s=Lighting:FindFirstChild('VV_Sky'); if s then s:Destroy() end
+        restoreOriginal('Sky',skyBackup)
+    end
+    if S.skyEnabled or S.fogOn then
+        dropOriginals('Atmosphere')
+        local atm=ensureLight('Atmosphere','VV_Atm')
+        local ap
+        if p then ap={Color=p.fog,Decay=p.ambient,Density=p.density,Haze=p.haze,Glare=p.glare,Offset=0}
+        else ap={Color=fc,Decay=fc,Density=.3,Haze=1,Glare=0,Offset=0} end
+        if S.fogOn then
+            ap.Color=fc; ap.Decay=fc:Lerp(RGB(0,0,0),.3)
+            ap.Density=S.fogDensity/100; ap.Haze=S.fogHaze/10
+        end
+        setProps(atm,ap)
+    else
+        local a=Lighting:FindFirstChild('VV_Atm'); if a then a:Destroy() end
+        restoreOriginal('Atmosphere',atmBackup)
+    end
+    if p then
+        setL('ClockTime',p.clock); setL('Ambient',p.ambient); setL('OutdoorAmbient',p.outdoor)
+        setL('FogColor',p.fog); setL('FogEnd',100000); setL('ExposureCompensation',p.exposure)
+    end
+    if S.fogOn then
+        setL('FogColor',fc); setL('FogStart',S.fogStart); setL('FogEnd',math.max(S.fogEnd,S.fogStart+10))
+    end
+    if S.timeOn then setL('ClockTime',S.time) end
+    if S.night then setL('ClockTime',0) end
+    if S.full then setL('Brightness',5) end
+    if S.amb then setL('Ambient',C.accent) end
+    applyLighting()
+end
+
+-- ===================== MENU =====================
+local gui=new('ScreenGui',{Name='VioletVisualsGUI',ResetOnSpawn=false,IgnoreGuiInset=true,DisplayOrder=100},parent)
+
+local toggleOpen=new('TextButton',{
+    Visible=false,ZIndex=20,Size=UDim2.fromOffset(46,42),Position=UDim2.fromOffset(14,95),
+    Text='◇',TextSize=27,Font=Enum.Font.GothamBold,TextColor3=C.white,BackgroundColor3=C.panel
+},gui)
+corner(toggleOpen,10); stroke(toggleOpen,C.accent,1)
+
+local main=new('Frame',{
+    Size=UDim2.new(.94,0,.82,0),Position=UDim2.new(.03,0,.09,0),
+    BackgroundColor3=C.panelGlass,BorderSizePixel=0,ClipsDescendants=true
+},gui)
+corner(main,14); stroke(main,C.line,.8)
+new('UISizeConstraint',{MaxSize=Vector2.new(1300,880),MinSize=Vector2.new(300,320)},main)
+-- Glassmorphism: frosted glass gradient + subtle inner glow
+gradient(main,C.panel,C.panelGlass,90)
+-- Inner glass effect
+local innerGlass=new('Frame',{Size=UDim2.new(1,0,1,0),BackgroundColor3=Color3.new(1,1,1),BackgroundTransparency=.82},main)
+corner(innerGlass,14)
+new('UIGradient',{Color=ColorSequence.new(C.white,C.muted)},innerGlass)
+
+local openTween
+local function setOpen(v)
+    if openTween then openTween:Cancel() end
+    if v then
+        main.Visible=true; toggleOpen.Visible=false
+        main.Size=UDim2.new(.94,0,.5,0); main.BackgroundTransparency=1
+        openTween=TweenService:Create(main,TweenInfo.new(.25,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),
+            {Size=UDim2.new(.94,0,.82,0),BackgroundTransparency=0})
+        openTween:Play()
+    else
+        local tw=TweenService:Create(main,TweenInfo.new(.18,Enum.EasingStyle.Quart),
+            {Size=UDim2.new(.94,0,.5,0),BackgroundTransparency=1})
+        openTween=tw
+        tw:Play()
+        tw.Completed:Connect(function(st)
+            if st==Enum.PlaybackState.Completed then main.Visible=false; toggleOpen.Visible=true end
+        end)
+    end
+end
+
+-- header
+local header=new('Frame',{Size=UDim2.new(1,0,0,68),BackgroundTransparency=.92,BackgroundColor3=C.panelGlass},main)
+local logo=label(header,'◇',28,true,C.accent2); logo.Size=UDim2.fromOffset(35,42); logo.Position=UDim2.fromOffset(20,13)
+local brand=label(header,'VIOLET  VISUALS',15,true,C.accent); brand.Size=UDim2.fromOffset(200,22); brand.Position=UDim2.fromOffset(56,14)
+local version=label(header,'v5 · client',10,false,C.muted); version.Size=UDim2.fromOffset(200,18); version.Position=UDim2.fromOffset(56,36)
+
+local tabs=new('ScrollingFrame',{
+    Size=UDim2.new(1,-320,0,48),Position=UDim2.fromOffset(230,10),
+    BackgroundTransparency=1,ScrollBarThickness=0,BorderSizePixel=0,
+    ScrollingDirection=Enum.ScrollingDirection.X,CanvasSize=UDim2.fromOffset(680,0)
+},header)
+new('UIListLayout',{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,8),VerticalAlignment=Enum.VerticalAlignment.Center},tabs)
+
+local closeBtn=new('TextButton',{
+    Size=UDim2.fromOffset(40,40),Position=UDim2.new(1,-56,0,14),
+    BackgroundColor3=C.panelGlass,Text='X',TextSize=16,Font=Enum.Font.GothamBold,
+    TextColor3=C.muted,BorderSizePixel=0,AutoButtonColor=false,ZIndex=5
+},header)
+corner(closeBtn,8); stroke(closeBtn,C.line,.5)
+closeBtn.MouseEnter:Connect(function() TweenService:Create(closeBtn,TweenInfo.new(.1),{TextColor3=C.danger,BackgroundColor3=C.fieldHi}):Play() end)
+closeBtn.MouseLeave:Connect(function() TweenService:Create(closeBtn,TweenInfo.new(.1),{TextColor3=C.muted,BackgroundColor3=C.field}):Play() end)
+closeBtn.MouseButton1Click:Connect(function() setOpen(false) end)
+
+new('Frame',{Size=UDim2.new(1,0,0,1),Position=UDim2.fromOffset(0,68),BorderSizePixel=0,BackgroundColor3=C.line},main)
+
+-- body
+local body=new('ScrollingFrame',{
+    Size=UDim2.new(1,-24,1,-88),Position=UDim2.fromOffset(12,78),
+    BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=4,
+    ScrollBarImageColor3=C.accent,ScrollingDirection=Enum.ScrollingDirection.X,
+    CanvasSize=UDim2.fromOffset(1120,0)
+},main)
+local columns=new('Frame',{Size=UDim2.new(0,1120,1,-4),BackgroundTransparency=1},body)
+new('UIListLayout',{FillDirection=Enum.FillDirection.Horizontal,Padding=UDim.new(0,14)},columns)
+
+local function column()
+    local f=new('ScrollingFrame',{
+        Size=UDim2.new(0,356,1,0),BackgroundTransparency=1,BorderSizePixel=0,
+        ScrollBarThickness=2,ScrollBarImageColor3=C.accent,CanvasSize=UDim2.new()
+    },columns)
+    local l=new('UIListLayout',{Padding=UDim.new(0,12)},f)
+    l:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+        f.CanvasSize=UDim2.fromOffset(0,l.AbsoluteContentSize.Y+12)
+    end)
+    return f
+end
+
+local function card(col,name,height)
+    local f=new('Frame',{Size=UDim2.new(1,-6,0,height),BackgroundColor3=C.panelGlass,BorderSizePixel=0},col)
+    corner(f,13)
+    stroke(f,C.line,.5)
+    -- Glassmorphism: semi-transparent gradient + highlight
+    gradient(f,RGB(40,36,54),RGB(30,27,42),90)
+    local gl=new('Frame',{Size=UDim2.new(1,0,1,0),BackgroundTransparency=.88,BorderSizePixel=0},f)
+    corner(gl,13)
+    new('UIGradient',{Transparency=NumberSequence.new{
+        NumberSequenceKeypoint.new(0,.6),NumberSequenceKeypoint.new(.5,.85),NumberSequenceKeypoint.new(1,.6)
+    },Color=ColorSequence.new(C.white)},gl)
+    local t=label(f,name,16,true); t.Size=UDim2.new(1,-95,0,30); t.Position=UDim2.fromOffset(18,14)
+    return f
+end
+
+local function switch(par,x,y,initial,cb)
+    local state=initial or false
+    local b=new('TextButton',{
+        Size=UDim2.fromOffset(52,28),Position=UDim2.new(1,-68,0,y),
+        BackgroundColor3=state and C.accent or C.field,BorderSizePixel=0,Text='',AutoButtonColor=false
+    },par)
+    corner(b,16); stroke(b,C.line,.3)
+    local dot=new('Frame',{Size=UDim2.fromOffset(18,18),Position=UDim2.fromOffset(state and 28 or 4,5),
+        BackgroundColor3=state and C.white or C.muted,BorderSizePixel=0},b)
+    corner(dot,9)
+    if state then gradient(dot,C.accent,C.accent2,0) end
+    b.MouseButton1Click:Connect(function()
+        state=not state
+        TweenService:Create(b,TweenInfo.new(.2,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundColor3=state and C.accent or C.field}):Play()
+        TweenService:Create(dot,TweenInfo.new(.2,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Position=UDim2.fromOffset(state and 28 or 4,5),
+            BackgroundColor3=state and C.white or C.muted}):Play()
+        if cb then cb(state) end
+    end)
+    return b
+end
+
+local function line(par,text,y)
+    local t=label(par,text,13,true); t.Size=UDim2.new(1,-36,0,22); t.Position=UDim2.fromOffset(18,y)
+    return t
+end
+local function note(par,text,y,h)
+    local t=label(par,text,11,false,C.muted); t.Size=UDim2.new(1,-36,0,h or 20); t.Position=UDim2.fromOffset(18,y)
+    return t
+end
+
+local function dropdown(par,name,items,y,cb,start)
+    line(par,name,y)
+    local i=start or 1
+    local b=new('TextButton',{
+        Size=UDim2.new(1,-36,0,38),Position=UDim2.fromOffset(18,y+30),
+        BackgroundColor3=C.field,Text='▾   '..items[i],
+        TextXAlignment=Enum.TextXAlignment.Left,
+        TextColor3=C.white,TextSize=12,Font=Enum.Font.Gotham,BorderSizePixel=0,AutoButtonColor=false
+    },par)
+    new('UIPadding',{PaddingLeft=UDim.new(0,10)},b)
+    corner(b,8); stroke(b,C.line,.3)
+    b.MouseButton1Click:Connect(function()
+        i=i%#items+1
+        b.Text='▾   '..items[i]
+        if cb then cb(items[i],i) end
+    end)
+end
+
+local function slider(par,name,y,min,max,default,cb)
+    line(par,name,y)
+    local val=label(par,tostring(default),12,false,C.muted)
+    val.Size=UDim2.fromOffset(65,20); val.Position=UDim2.new(1,-80,0,y); val.TextXAlignment=Enum.TextXAlignment.Right
+    local a0=math.clamp((default-min)/(max-min),0,1)
+    local bar=new('Frame',{Size=UDim2.new(1,-36,0,6),Position=UDim2.fromOffset(18,y+36),
+        BackgroundColor3=C.field,BorderSizePixel=0},par)
+    corner(bar,4)
+    local fill=new('Frame',{Size=UDim2.new(a0,0,1,0),BackgroundColor3=C.accent,BorderSizePixel=0},bar)
+    corner(fill,3); gradient(fill,C.accent,C.accent2,0)
+    local dot=new('Frame',{Size=UDim2.fromOffset(15,15),Position=UDim2.new(a0,-7,.5,-7),
+        BackgroundColor3=C.white,BorderSizePixel=0},bar)
+    corner(dot,8)
+    local dragging=false
+    local hit=new('Frame',{Size=UDim2.new(1,0,0,30),Position=UDim2.new(0,0,.5,-15),BackgroundTransparency=1,Active=true},bar)
+    local function update(x)
+        local a=math.clamp((x-bar.AbsolutePosition.X)/bar.AbsoluteSize.X,0,1)
+        local n=math.floor(min+(max-min)*a+.5)
+        fill.Size=UDim2.new(a,0,1,0); dot.Position=UDim2.new(a,-6,.5,-6); val.Text=tostring(n)
+        if cb then cb(n) end
+    end
+    hit.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dragging=true; update(i.Position.X)
+        end
+    end)
+    local c1=UIS.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+            update(i.Position.X)
+        end
+    end)
+    local c2=UIS.InputEnded:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dragging=false
+        end
+    end)
+    bar.Destroying:Connect(function() c1:Disconnect(); c2:Disconnect() end)
+end
+
+local function action(par,text,y,cb,color)
+    local b=new('TextButton',{
+        Size=UDim2.new(1,-36,0,40),Position=UDim2.fromOffset(18,y),
+        BackgroundColor3=color or C.field,Text=text,Font=Enum.Font.GothamBold,
+        TextSize=12,TextColor3=C.white,BorderSizePixel=0,AutoButtonColor=false
+    },par)
+    corner(b,9); stroke(b,C.line,.5)
+    if not color then gradient(b,C.fieldHi,RGB(38,34,52),90) end
+    b.MouseEnter:Connect(function() TweenService:Create(b,TweenInfo.new(.15,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundColor3=C.fieldHi}):Play() end)
+    b.MouseLeave:Connect(function() TweenService:Create(b,TweenInfo.new(.15,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{BackgroundColor3=color or C.field}):Play() end)
+    b.MouseButton1Click:Connect(cb)
+    return b
+end
+
+local function textbox(par,y,placeholder,text,cb)
+    local tb=new('TextBox',{
+        Size=UDim2.new(1,-36,0,36),Position=UDim2.fromOffset(18,y),BackgroundColor3=C.field,
+        Text=text or '',PlaceholderText=placeholder,PlaceholderColor3=C.muted,TextColor3=C.white,
+        ClearTextOnFocus=false,TextSize=12,Font=Enum.Font.Gotham,TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0
+    },par)
+    new('UIPadding',{PaddingLeft=UDim.new(0,10)},tb)
+    corner(tb,8); stroke(tb,C.line,.3)
+    tb.FocusLost:Connect(function() cb(tb.Text) end)
+    return tb
+end
+
+-- ===================== CHARACTER MODELS =====================
+local morph={kind=nil,model=nil,step=nil,base=nil,rightArm=nil,hideConn=nil}
+
+local function hideOne(d)
+    if (d:IsA('BasePart') or d:IsA('Decal')) and d.Name~='HumanoidRootPart'
+       and d:GetAttribute('VV_T')==nil and not d:FindFirstAncestorOfClass('Tool') then
+        d:SetAttribute('VV_T',d.Transparency)
+        d.Transparency=1
+    end
+end
+local function hideChar(ch)
+    for _,d in ipairs(ch:GetDescendants()) do hideOne(d) end
+    if morph.hideConn then morph.hideConn:Disconnect() end
+    morph.hideConn=ch.DescendantAdded:Connect(hideOne)
+end
+track(player.CharacterAdded:Connect(function(c)
+    if morph.kind then task.wait(.1); hideChar(c) end
+end))
+
+local function block(m,name,size,col,mat,shape,tr)
+    return new('Part',{
+        Name=name,Size=size,Color=col,Anchored=true,CanCollide=false,CanQuery=false,CanTouch=false,
+        Material=mat or Enum.Material.SmoothPlastic,Shape=shape or Enum.PartType.Block,Transparency=tr or 0
+    },m)
+end
+
+local DEFS={
+    Bunny={fur=RGB(190,172,216),robe=RGB(205,197,221),limb=RGB(205,197,221),leg=RGB(190,172,216),hand=RGB(240,232,248),foot=RGB(240,232,248),light=RGB(245,238,252),dark=RGB(20,9,20),ear=RGB(160,138,200),belly=RGB(240,232,248),cheek=RGB(214,190,232)},
+    Fox={fur=RGB(240,125,40),robe=RGB(235,115,35),limb=RGB(235,115,35),leg=RGB(235,115,35),hand=RGB(70,40,30),foot=RGB(70,40,30),light=RGB(255,238,215),dark=RGB(30,15,12),belly=RGB(255,238,215),cheek=RGB(255,238,215)},
+    Cat={fur=RGB(88,84,108),robe=RGB(80,76,100),limb=RGB(80,76,100),leg=RGB(80,76,100),hand=RGB(215,210,230),foot=RGB(215,210,230),light=RGB(230,225,242),dark=RGB(20,15,25),belly=RGB(215,210,230)},
+    Wolf={fur=RGB(125,128,145),robe=RGB(112,115,132),limb=RGB(112,115,132),leg=RGB(100,103,120),hand=RGB(215,218,230),foot=RGB(70,72,85),light=RGB(225,228,238),dark=RGB(20,20,28),snout=RGB(165,168,182),belly=RGB(210,213,225)},
+    Dragon={fur=RGB(190,35,45),robe=RGB(150,25,35),limb=RGB(160,28,38),leg=RGB(140,22,32),hand=RGB(255,205,70),foot=RGB(255,205,70),light=RGB(255,215,90),dark=RGB(25,8,10),snout=RGB(160,30,38),belly=RGB(255,205,70)},
+    Ghost={fur=RGB(215,225,255),robe=RGB(205,215,255),limb=RGB(205,215,255),leg=RGB(205,215,255),hand=RGB(235,240,255),foot=RGB(235,240,255),light=RGB(245,248,255),dark=RGB(25,25,50),tr=.35,noLegs=true,float=true},
+    Robot={fur=RGB(150,158,175),robe=RGB(112,120,138),limb=RGB(125,133,150),leg=RGB(110,118,135),hand=RGB(60,66,80),foot=RGB(60,66,80),light=RGB(70,235,255),dark=RGB(18,20,28)},
+    Ghoul={fur=RGB(232,226,236),robe=RGB(40,40,50),limb=RGB(40,40,50),leg=RGB(32,32,40),hand=RGB(232,226,236),foot=RGB(60,25,30),light=RGB(240,235,245),dark=RGB(15,10,15)},
+    Panda={fur=RGB(246,246,250),robe=RGB(246,246,250),limb=RGB(30,30,36),leg=RGB(30,30,36),hand=RGB(30,30,36),foot=RGB(30,30,36),light=RGB(255,255,255),dark=RGB(20,20,26)},
+    Deer={fur=RGB(190,140,95),robe=RGB(180,130,88),limb=RGB(175,125,85),leg=RGB(120,80,55),hand=RGB(80,55,40),foot=RGB(70,48,35),light=RGB(245,232,210),dark=RGB(30,18,12),belly=RGB(245,232,210),snout=RGB(225,190,150)},
+}
+local MORPH_ORDER={'Bunny','Fox','Cat','Wolf','Dragon','Ghost','Robot','Ghoul','Panda','Deer'}
+local MORPH_DESC={
+    Bunny='Лавандовый кролик · зубастый рот · посох с орбом',
+    Fox='Рыжий лис · пушистый хвост · белые щёки',
+    Cat='Тёмный кот · светящиеся глаза · усы и бубенчик',
+    Wolf='Серый волк · красные глаза · густая грива',
+    Dragon='Красный дракон · рога, шипы и крылья',
+    Ghost='Призрак · полупрозрачный · парит над землёй',
+    Robot='Робот · неоновый визор · реактор на груди',
+    Ghoul='Гуль · белые волосы · красный какуган',
+    Panda='Панда · круглые уши · пятна вокруг глаз',
+    Deer='Олень · ветвистые рога · светлые пятна',
+}
+
+local function buildMorph(kind)
+    if morph.hideConn then morph.hideConn:Disconnect(); morph.hideConn=nil end
+    if morph.model then morph.model:Destroy(); morph.model=nil end
+    morph.kind=nil; morph.step=nil; morph.base=nil; morph.rightArm=nil
+    restoreAll(player.Character)
+    if not kind then return end
+    local def=DEFS[kind]
+    if not def then return end
+
+    local m=new('Model',{Name='VV_'..kind})
+    local rig={}
+    local V=Vector3.new
+    local BOX,BALL=Enum.PartType.Block,Enum.PartType.Ball
+    local NEON=Enum.Material.Neon
+    local WHITE=Color3.new(1,1,1)
+    local F,R,Lt,Dk=def.fur,def.robe,def.light,def.dark
+    local EAR=def.ear or F
+    local pink=RGB(235,150,185)
+    local rightHand
+
+    local function P(n,shape,size,cf,col,o)
+        o=o or {}
+        local tr=o.tr or def.tr or 0
+        local p=block(m,n,size,col,o.mat,shape,tr)
+        local r={p=p,cf=cf,k=o.k,s=o.s or 1,piv=o.piv,i=o.i,ph=o.ph or 0,lid=o.lid,breath=o.breath,size=size,tr=tr}
+        rig[#rig+1]=r
+        return r
+    end
+    local function Bx(n,size,x,y,z,col,o) return P(n,BOX,size,CFrame.new(x,y,z),col,o) end
+    local function Bl(n,d,x,y,z,col,o) return P(n,BALL,V(d,d,d),CFrame.new(x,y,z),col,o) end
+    local function El(n,size,x,y,z,col,o) return P(n,BALL,size,CFrame.new(x,y,z),col,o) end
+    local function Dm(n,w,d,x,y,z,col,o) return P(n,BOX,V(w,w,d),CFrame.new(x,y,z)*CFrame.Angles(0,0,math.rad(45)),col,o) end
+    local function Sp(n,w,x,y,z,col,o) return P(n,BOX,V(.28,w,w),CFrame.new(x,y,z)*CFrame.Angles(math.rad(45),0,0),col,o) end
+    local function Seg(n,p1,p2,th,col,o)
+        return P(n,BOX,V(th,th,(p2-p1).Magnitude+th*.5),CFrame.lookAt((p1+p2)/2,p2),col,o)
+    end
+    local function eyes(y,col,xs,size,mat,slit,lidc)
+        for _,x in ipairs({-xs,xs}) do
+            Bl('Eye',size,x,y,-.98,col,{mat=mat})
+            if slit then
+                Bx('Pupil',V(size*.28,size*.85,.05),x,y,-.98-size/2-.02,Dk)
+            else
+                Bl('Eye Shine',size*.32,x+size*.18,y+size*.2,-.98-size*.42,WHITE)
+            end
+            local l=Bx('Lid',V(size*1.25,size*1.25,.06),x,y,-.98-size/2-.08,lidc or F,{lid=true})
+            l.p.Transparency=1
+        end
+    end
+    local function tailChain(sizes,pts,col,tip)
+        for i,d in ipairs(sizes) do
+            Bl('Tail',d,pts[i][1],pts[i][2],pts[i][3],(i==#sizes and tip) or col,{k='tail',i=i})
+        end
+    end
+
+    -- ===== common skeleton =====
+    Bx('Body',V(2.15,2.5,1.15),0,0,0,R,{breath=true})
+    if def.belly then Bx('Belly',V(1.45,1.7,.12),0,-.05,-.6,def.belly) end
+    Bx('Head',V(2.65,2.5,1.65),0,2.35,-.1,F)
+    if def.cheek then
+        for _,x in ipairs({-1.15,1.15}) do Bl('Cheek',.95,x,1.85,-.7,def.cheek) end
+    end
+    for _,x in ipairs({-1.42,1.42}) do
+        local o={k='arm',s=x>0 and -1 or 1}
+        Bl('Shoulder',1.0,x,.85,0,def.limb,o)
+        Bx('Arm',V(.73,2.1,1.05),x,-.17,0,def.limb,o)
+        local h=Bl('Hand',.88,x,-1.2,0,def.hand,o)
+        if x>0 then rightHand=h.p end
+    end
+    if not def.noLegs then
+        for _,x in ipairs({-.55,.55}) do
+            local o={k='leg',s=x>0 and 1 or -1}
+            Bx('Leg',V(.93,1.55,1.05),x,-1.98,0,def.leg,o)
+            Bx('Foot',V(1,.38,1.38),x,-2.84,-.2,def.foot,o)
+        end
+    end
+
+    -- ===== per-kind details =====
+    if kind=='Bunny' then
+        for _,x in ipairs({-.78,.78}) do
+            local o={k='ear',piv=V(x,3.55,0),s=x>0 and 1 or -1,ph=x}
+            Bx('Ear',V(.68,1.65,.55),x,4.35,0,EAR,o)
+            Bx('Inner Ear',V(.35,1.0,.08),x,4.4,-.3,pink,o)
+            Bl('Ear Tip',.68,x,5.17,0,EAR,o)
+        end
+        eyes(3.0,Dk,.95,.42)
+        Bx('Open Mouth',V(2,1.15,.13),0,2.15,-.99,RGB(48,14,60))
+        Bx('Tongue',V(1.2,.3,.1),0,1.85,-1.02,RGB(235,110,150))
+        for _,x in ipairs({-.8,-.4,0,.4,.8}) do Bx('Tooth',V(.3,.3,.15),x,2.58,-1.06,Lt) end
+        for _,x in ipairs({-.6,-.2,.2,.6}) do Bx('Tooth',V(.26,.22,.15),x,1.72,-1.06,Lt) end
+        Bl('Pom Tail',.95,0,-.7,.95,Lt,{k='tail',i=1})
+        P('Staff',BOX,V(.2,3.6,.2),CFrame.new(-1.45,-.6,-1.5)*CFrame.Angles(math.rad(-65),0,0),RGB(118,78,46),{k='arm',s=1})
+        Bl('Staff Orb',.6,-1.45,.16,-3.13,RGB(170,120,255),{k='arm',s=1,mat=NEON})
+    elseif kind=='Fox' then
+        for _,x in ipairs({-.88,.88}) do
+            local o={k='ear',piv=V(x,3.5,0),s=x>0 and 1 or -1,ph=x}
+            Dm('Ear',.8,.4,x,3.9,0,EAR,o)
+            Dm('Inner Ear',.45,.1,x,3.85,-.2,pink,o)
+        end
+        eyes(2.75,Dk,.9,.42)
+        Bl('Muzzle',1.15,0,1.9,-1.0,Lt)
+        Bl('Nose',.3,0,2.1,-1.55,Dk)
+        tailChain({1.0,1.25,1.4,1.25,.95},{{0,-.8,.95},{0,-.7,1.7},{0,-.55,2.5},{0,-.4,3.25},{0,-.3,3.9}},F,Lt)
+    elseif kind=='Cat' then
+        for _,x in ipairs({-.9,.9}) do
+            local o={k='ear',piv=V(x,3.5,0),s=x>0 and 1 or -1,ph=x}
+            Dm('Ear',.8,.4,x,3.9,0,F,o)
+            Dm('Inner Ear',.45,.1,x,3.85,-.2,pink,o)
+        end
+        eyes(2.75,RGB(120,255,150),.85,.55,NEON,true)
+        Bl('Nose',.22,0,2.3,-.98,pink)
+        Bx('Mouth',V(.5,.06,.06),0,2.02,-.98,Dk)
+        for _,x in ipairs({-1.75,1.75}) do
+            for j,dy in ipairs({.18,0,-.18}) do
+                P('Whisker',BOX,V(.95,.03,.03),CFrame.new(x,2.15+dy,-.9)*CFrame.Angles(0,0,math.rad((j-2)*10*(x>0 and 1 or -1))),Lt)
+            end
+        end
+        Bx('Collar',V(1.7,.26,1.3),0,1.15,0,RGB(190,40,60))
+        Bl('Bell',.34,0,.95,-.72,RGB(255,205,80),{mat=NEON})
+        tailChain({.5,.46,.44,.42,.4,.38,.36},{{0,-.9,.8},{0,-.8,1.3},{0,-.5,1.7},{0,0,1.95},{0,.6,2.0},{0,1.2,1.85},{0,1.7,1.55}},F,Lt)
+    elseif kind=='Wolf' then
+        for _,x in ipairs({-.85,.85}) do
+            local o={k='ear',piv=V(x,3.5,0),s=x>0 and 1 or -1,ph=x}
+            P('Ear',BOX,V(.7,1.15,.5),CFrame.new(x*1.02,4.1,0)*CFrame.Angles(0,0,math.rad(-x*14)),F,o)
+            P('Inner Ear',BOX,V(.35,.7,.08),CFrame.new(x*1.02,4.05,-.27)*CFrame.Angles(0,0,math.rad(-x*14)),RGB(55,58,70),o)
+        end
+        eyes(2.85,RGB(235,50,55),.9,.36,NEON)
+        Bx('Snout',V(1.25,.95,1.0),0,2.0,-1.35,def.snout)
+        Bl('Nose',.42,0,2.35,-1.88,Dk)
+        Bx('Mouth',V(1.0,.06,.1),0,1.72,-1.86,Dk)
+        for _,x in ipairs({-.4,.4}) do Dm('Fang',.2,.06,x,1.62,-1.85,WHITE) end
+        for _,x in ipairs({-1.05,-.5,0,.5,1.05}) do
+            P('Mane',BOX,V(.7,.7,.7),CFrame.new(x,1.2,-.05)*CFrame.Angles(0,0,math.rad(45)),Lt)
+        end
+        Dm('Chest Fur',1.0,.2,0,.9,-.62,Lt)
+        tailChain({1.0,1.3,1.5,1.3,1.0},{{0,-.7,.9},{0,-1.0,1.7},{0,-1.3,2.5},{0,-1.5,3.2},{0,-1.55,3.8}},F,Lt)
+    elseif kind=='Dragon' then
+        for _,x in ipairs({-1,1}) do
+            P('Horn',BOX,V(.32,1.0,.32),CFrame.new(x*.8,4.0,.1)*CFrame.Angles(math.rad(-20),0,math.rad(-x*14)),Lt)
+            P('Horn Tip',BOX,V(.24,.9,.24),CFrame.new(x*1.02,4.85,-.12)*CFrame.Angles(math.rad(-38),0,math.rad(-x*22)),RGB(255,235,170))
+            Dm('Ear Fin',.7,.1,x*1.5,2.5,.1,RGB(255,200,70))
+        end
+        eyes(2.75,RGB(255,215,60),.88,.5,NEON,true)
+        Bx('Snout',V(1.5,.9,.9),0,1.9,-1.3,def.snout)
+        for _,x in ipairs({-.3,.3}) do Bl('Nostril',.2,x,2.2,-1.72,Dk) end
+        for _,x in ipairs({-.55,-.18,.18,.55}) do Dm('Tooth',.2,.06,x,1.58,-1.72,WHITE) end
+        for i,y in ipairs({1.1,.4,-.3,-.95}) do Sp('Back Spike',.7-.07*i,0,y,.72,RGB(255,205,70)) end
+        for i,y in ipairs({3.5,3.1,2.7}) do Sp('Head Spike',.5-.06*i,0,y,.78,RGB(255,205,70)) end
+        for _,s in ipairs({-1,1}) do
+            local o={k='wing',s=s,piv=V(s*.7,1.2,.7)}
+            P('Wing Bone',BOX,V(2.9,.15,.15),CFrame.new(s*2.0,2.0,.9)*CFrame.Angles(0,0,math.rad(s*18)),RGB(120,18,28),o)
+            P('Wing Bone',BOX,V(2.3,.13,.13),CFrame.new(s*1.9,1.0,1.1)*CFrame.Angles(0,math.rad(s*-12),math.rad(s*-6)),RGB(120,18,28),o)
+            P('Wing Membrane',BOX,V(2.6,.06,1.5),CFrame.new(s*2.0,1.55,1.1)*CFrame.Angles(0,math.rad(s*-10),math.rad(s*10)),RGB(215,50,60),{k='wing',s=s,piv=V(s*.7,1.2,.7),tr=.15})
+        end
+        tailChain({1.0,.9,.78,.64,.5,.36},{{0,-.9,.9},{0,-1.1,1.7},{0,-1.2,2.5},{0,-1.1,3.2},{0,-.9,3.8},{0,-.6,4.3}},F,RGB(255,205,70))
+    elseif kind=='Ghost' then
+        eyes(2.75,Dk,.85,.6)
+        El('Mouth',V(.5,.65,.2),0,1.95,-.98,Dk)
+        for i,d in ipairs({{2.5,.7,1.5,-1.4},{2.2,.6,1.4,-2.0},{1.8,.5,1.2,-2.5}}) do
+            Bx('Skirt',V(d[1],d[2],d[3]),0,d[4],0,R,{k='skirt',i=i})
+        end
+        for i,x in ipairs({-.8,-.27,.27,.8}) do
+            Bl('Skirt Tip',.6,x,-2.95,0,R,{k='skirt',i=i+3})
+        end
+    elseif kind=='Robot' then
+        Bx('Visor',V(2.1,.6,.1),0,2.75,-.97,Dk)
+        for _,x in ipairs({-.5,.5}) do Bx('Eye',V(.6,.24,.06),x,2.75,-1.03,Lt,{mat=NEON}) end
+        for i=0,2 do Bx('Grille',V(1.2,.08,.08),0,1.75+i*.2,-.98,Dk) end
+        for _,x in ipairs({-1.5,1.5}) do
+            Bx('Ear Plate',V(.35,.9,.9),x,2.35,0,RGB(90,98,115))
+            Bl('Ear Light',.3,x*1.07,2.35,-.1,Lt,{mat=NEON})
+        end
+        Bx('Antenna',V(.12,.9,.12),0,3.85,0,RGB(60,66,80))
+        Bl('Antenna Bulb',.42,0,4.4,0,Lt,{mat=NEON})
+        Bx('Chest Plate',V(1.7,1.5,.12),0,.4,-.62,RGB(90,98,115))
+        Bl('Reactor',.6,0,.45,-.72,Lt,{mat=NEON})
+        Bx('Belt',V(2.25,.28,1.2),0,-1.05,0,RGB(60,66,80))
+        Bx('Jetpack',V(1.4,1.7,.5),0,.2,.85,RGB(80,88,105))
+        for _,x in ipairs({-.4,.4}) do Bl('Thruster',.45,x,-.8,.9,Lt,{mat=NEON}) end
+        for _,x in ipairs({-1.42,1.42}) do Bl('Joint',.5,x,.85,0,Lt,{k='arm',s=x>0 and -1 or 1,mat=NEON}) end
+    elseif kind=='Ghoul' then
+        for i,x in ipairs({-1.15,-.6,-.05,.5,1.05}) do
+            P('Hair',BOX,V(.55,1.0,.55),CFrame.new(x,3.85+(i%2)*.15,-.1)*CFrame.Angles(0,0,math.rad(-x*16)),Lt)
+        end
+        for _,x in ipairs({-.8,0,.8}) do
+            P('Bang',BOX,V(.6,.8,.35),CFrame.new(x,3.3,-.85)*CFrame.Angles(math.rad(-18),0,math.rad(x*10)),Lt)
+        end
+        for _,x in ipairs({-1.3,1.3}) do P('Side Hair',BOX,V(.4,1.0,.8),CFrame.new(x,2.9,-.1),Lt) end
+        Bl('Eye',.4,.9,2.7,-.98,Dk)
+        Bl('Eye Shine',.13,.98,2.8,-1.14,WHITE)
+        local l=Bx('Lid',V(.52,.52,.06),.9,2.7,-1.2,F,{lid=true}); l.p.Transparency=1
+        Bx('Kakugan Sclera',V(.55,.55,.1),-.9,2.7,-1.0,Dk)
+        Bl('Kakugan Iris',.3,-.9,2.7,-1.08,RGB(235,25,40),{mat=NEON})
+        Bx('Mouth',V(.7,.06,.08),0,1.9,-.98,RGB(90,50,60))
+        Bx('Collar',V(2.4,.4,1.3),0,1.3,0,RGB(150,20,35))
+        Bx('Coat Tail',V(2.35,.95,1.3),0,-1.45,0,R)
+        Bx('Belt',V(2.2,.2,1.2),0,-.85,0,RGB(150,20,35))
+    elseif kind=='Panda' then
+        for _,x in ipairs({-1.1,1.1}) do
+            local o={k='ear',piv=V(x,3.45,0),s=x>0 and 1 or -1,ph=x}
+            Bl('Ear',1.0,x,3.7,0,Dk,o)
+            Bl('Inner Ear',.5,x,3.7,-.3,RGB(90,90,100),o)
+        end
+        for _,x in ipairs({-.8,.8}) do
+            El('Eye Patch',V(.85,1.0,.3),x,2.65,-.95,Dk)
+            Bl('Eye',.32,x,2.68,-1.12,WHITE)
+            Bl('Pupil',.17,x,2.68,-1.26,Dk)
+            local l=Bx('Lid',V(.6,.6,.06),x,2.68,-1.34,Dk,{lid=true}); l.p.Transparency=1
+        end
+        El('Nose',V(.65,.42,.3),0,2.1,-1.02,Dk)
+        Bx('Mouth',V(.6,.07,.07),0,1.7,-.98,Dk)
+        Bl('Tail',.85,0,-.8,.85,Lt,{k='tail',i=1})
+    elseif kind=='Deer' then
+        for _,x in ipairs({-1,1}) do
+            local o={k='ear',piv=V(x*1.2,3.3,0),s=x,ph=x}
+            P('Ear',BOX,V(1.1,.45,.3),CFrame.new(x*1.7,3.4,0)*CFrame.Angles(0,0,math.rad(-x*25)),F,o)
+            P('Inner Ear',BOX,V(.8,.25,.08),CFrame.new(x*1.7,3.4,-.17)*CFrame.Angles(0,0,math.rad(-x*25)),pink,o)
+        end
+        local top={{V(.5,3.6,0),V(.8,4.5,-.1)},{V(.8,4.5,-.1),V(.6,5.3,0)},{V(.6,5.3,0),V(.95,6.1,.1)},{V(.8,4.5,-.1),V(1.5,5.1,-.2)},{V(.6,5.3,0),V(.05,5.9,.05)},{V(.95,6.1,.1),V(1.4,6.7,.15)}}
+        for _,sd in ipairs(top) do
+            for _,sx in ipairs({-1,1}) do
+                Seg('Antler',V(sd[1].X*sx,sd[1].Y,sd[1].Z),V(sd[2].X*sx,sd[2].Y,sd[2].Z),.2,RGB(225,205,170))
+            end
+        end
+        eyes(2.8,Dk,.88,.5)
+        El('Muzzle',V(1.3,1.0,.9),0,1.95,-1.1,def.snout)
+        Bl('Nose',.4,0,2.2,-1.55,Dk)
+        for _,pt in ipairs({{-.6,.7},{.5,.2},{-.2,-.5},{.7,-.7},{-.7,-.2}}) do
+            Bl('Spot',.38,pt[1],pt[2],.62,Lt)
+        end
+        Bl('Tail',.65,0,-.8,.8,Lt,{k='tail',i=1})
+    end
+
+    -- ===== animation =====
+    local TAILP=V(0,-.5,.6); local LEGP=V(0,-1.2,0); local ARMP=V(0,.88,0); local SKP=V(0,-1,0)
+    local t0=os.clock(); local nextBlink=t0+2.5; local blinkEnd=0
+    morph.model=m; morph.kind=kind
+    morph.step=function()
+        local ch=player.Character
+        local hum=ch and ch:FindFirstChildOfClass('Humanoid')
+        local root=(hum and hum.RootPart) or (ch and ch:FindFirstChild('HumanoidRootPart'))
+        if not root then morph.base=nil; return end
+        local drop=(hum and hum.RigType==Enum.HumanoidRigType.R15) and (hum.HipHeight+root.Size.Y/2) or 3
+        local v=root.AssemblyLinearVelocity
+        local sp=math.clamp(Vector3.new(v.X,0,v.Z).Magnitude/14,0,1)
+        local now=os.clock()
+        local t=now-t0
+        if now>nextBlink then blinkEnd=now+.14; nextBlink=now+math.random(25,50)/10 end
+        local blink=now<blinkEnd
+        local air=false
+        if hum then
+            local st=hum:GetState()
+            air=(st==Enum.HumanoidStateType.Freefall or st==Enum.HumanoidStateType.Jumping)
+        end
+        local ang=math.sin(t*10)*.7*sp
+        local floatY=def.float and (.9+math.sin(t*2)*.2) or 0
+        local bob=def.float and 0 or math.abs(ang)*.15
+        local base=root.CFrame*CFrame.new(0,3.03-drop+bob+floatY,0)*CFrame.Angles(-sp*.1,0,0)
+        for _,r in ipairs(rig) do
+            local cf=r.cf
+            local k=r.k
+            if k then
+                local piv,rot
+                if k=='leg' then piv=LEGP; rot=CFrame.Angles(ang*r.s,0,0)
+                elseif k=='arm' then piv=ARMP; rot=CFrame.Angles(air and 2.2 or ang*r.s,0,0)
+                elseif k=='tail' then
+                    local i=r.i or 1
+                    piv=TAILP; rot=CFrame.Angles(0,math.sin(t*2.6-i*.7)*.1*(i^.7)*(1+sp),0)
+                elseif k=='ear' then
+                    piv=r.piv
+                    rot=CFrame.Angles(sp*.3,0,math.sin(t*1.5+r.ph*3)*.06*r.s)
+                elseif k=='wing' then
+                    piv=r.piv; rot=CFrame.Angles(0,0,math.sin(t*(air and 9 or 2.5))*.25*r.s)
+                elseif k=='skirt' then
+                    local i=r.i or 1
+                    piv=SKP; rot=CFrame.Angles(math.sin(t*2.2+i)*.05,0,math.sin(t*1.9+i)*.05)
+                end
+                if piv then cf=CFrame.new(piv)*rot*CFrame.new(-piv)*cf end
+            end
+            if r.lid then r.p.Transparency=blink and r.tr or 1 end
+            if r.breath then r.p.Size=r.size*V(1,1+math.sin(t*2)*.02,1) end
+            r.p.CFrame=base*cf
+        end
+        morph.base=base
+        morph.rightArm=rightHand and rightHand.CFrame or nil
+    end
+    morph.step()
+    m.Parent=workspace
+    if player.Character then hideChar(player.Character) end
+end
+
+-- ===================== ANCHOR (where to attach cosmetics) =====================
+local Anchor={torso=CFrame.new(),head=CFrame.new(),hr=.6,rightArm=nil}
+local function updateAnchor()
+    if morph.kind and morph.base then
+        Anchor.torso=morph.base
+        Anchor.head=morph.base*CFrame.new(0,2.35,-.1)
+        Anchor.hr=1.25
+        Anchor.rightArm=morph.rightArm
+        return true
+    end
+    local ch=player.Character
+    if not ch then return false end
+    local torso=ch:FindFirstChild('UpperTorso') or ch:FindFirstChild('Torso') or ch:FindFirstChild('HumanoidRootPart')
+    if not torso then return false end
+    local head=ch:FindFirstChild('Head')
+    Anchor.torso=torso.CFrame
+    Anchor.head=head and head.CFrame or torso.CFrame*CFrame.new(0,1.5,0)
+    Anchor.hr=head and head.Size.Y/2 or .6
+    local rh=ch:FindFirstChild('RightHand') or ch:FindFirstChild('Right Arm')
+    if rh then
+        Anchor.rightArm=(rh.Name=='Right Arm') and rh.CFrame*CFrame.new(0,-.6,0) or rh.CFrame
+    else
+        Anchor.rightArm=nil
+    end
+    return true
+end
+
+-- ===================== COSMETICS =====================
+local Cos={}
+local V3=Vector3.new
+local function cp(m,name,size,col,mat,tr,shape)
+    return block(m,name,size,col,mat or Enum.Material.Neon,shape,tr or 0)
+end
+local function accent() return PALETTE[S.cosColor][2] end
+
+local function kaguneCosmetic()
+    local model=new('Model',{Name='VV_Kagune'})
+    local col=accent()
+    local plates=14
+    local slots={
+        {x=-.5,y=.9,yaw=-.55,pitch=.55,curl=.10,roll=-.5,ph=0},
+        {x=.5,y=.9,yaw=.55,pitch=.55,curl=.10,roll=.5,ph=1.3},
+        {x=-.4,y=.1,yaw=-1.25,pitch=.1,curl=.07,roll=-1.0,ph=2.6},
+        {x=.4,y=.1,yaw=1.25,pitch=.1,curl=.07,roll=1.0,ph=3.9},
+        {x=-.3,y=1.3,yaw=-.2,pitch=1.0,curl=.11,roll=-.3,ph=5.2},
+        {x=.3,y=1.3,yaw=.2,pitch=1.0,curl=.11,roll=.3,ph=6.5},
+        {x=-.4,y=-.4,yaw=-.7,pitch=-.5,curl=.05,roll=-.8,ph=7.8},
+        {x=.4,y=-.4,yaw=.7,pitch=-.5,curl=.05,roll=.8,ph=9.1},
+    }
+    local baseC=col:Lerp(Color3.new(0,0,0),.55)
+    local tipC=col:Lerp(Color3.new(1,1,1),.1)
+    local blades={}
+    for b=1,math.clamp(S.kn,1,8) do
+        local ps={}
+        for i=1,plates do
+            local f=(i-1)/(plates-1)
+            local c=baseC:Lerp(tipC,f)
+            if i%2==0 then c=c:Lerp(Color3.new(0,0,0),.14) end
+            local w=1.55*(1-f)^.85+.16
+            ps[i]={p=cp(model,'Kagune',V3(w,.1,1.2),c,i>=plates-1 and Enum.Material.Neon or Enum.Material.SmoothPlastic,.08),w=w}
+        end
+        blades[b]={sl=slots[b],ps=ps}
+    end
+    local function update(t,A,sp,air)
+        local len=S.kLen/100
+        local spd=S.kSpd/50
+        for _,bl in ipairs(blades) do
+            local sl=bl.sl
+            local cf=A.torso*CFrame.new(sl.x,sl.y,.55)*CFrame.Angles(0,sl.yaw*(air and 1.25 or 1),0)
+                *CFrame.Angles(-(sl.pitch-sp*.4),0,0)*CFrame.Angles(0,0,sl.roll)
+            for i,e in ipairs(bl.ps) do
+                local L=len*1.05
+                e.p.Size=V3(e.w,.1,L*1.3)
+                e.p.CFrame=cf*CFrame.new(0,0,L*.5)
+                local wv=math.sin(t*spd*2+i*.5+sl.ph)
+                cf=cf*CFrame.new(0,0,L*.92)
+                    *CFrame.Angles(-(sl.curl+wv*.035*(1+sp)),math.sin(t*spd*1.6+i*.4+sl.ph)*.03,0)
+            end
+        end
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+
+local function tentacleV2Cosmetic()
+    -- Tentacle V2 переработано под референс: изящные фиолетовые кристаллические щупальца.
+    -- Бывшие массивные красные щупальца заменены на тонкие тонкие энергетические tendrils
+    -- с кристаллическими кончиками и подсветкой — красиво и не агрессивно.
+    local model=new('Model',{Name='VV_TentacleV2'})
+    local pieces={}
+    local joints={}
+    local glows={}
+    local palette=PALETTE[S.cosColor] or PALETTE[1]
+    local base=palette[2]
+    local dark=base:Lerp(Color3.new(0,0,0),.35)
+    local light=base:Lerp(Color3.new(1,1,1),.18)
+    local crystal=RGB(230,220,255)
+
+    -- 4 идеально симметричных дуговых пути — плавный верхний и нижний слой (передний/задний вид)
+    local paths={
+        { -- левая верхняя (передний вид)
+            V3(-.30,.28,.45), V3(-.55,.60,.58), V3(-.82,1.00,.74),
+            V3(-1.22,1.48,.86), V3(-1.70,1.90,.96), V3(-2.18,2.22,1.04), V3(-2.58,2.30,1.06)
+        },
+        { -- правая верхняя (задний вид)
+            V3(.30,.28,.45), V3(.55,.62,.58), V3(.82,1.02,.74),
+            V3(1.22,1.50,.86), V3(1.70,1.92,.96), V3(2.18,2.24,1.04), V3(2.58,2.30,1.06)
+        },
+        { -- левая нижняя
+            V3(-.32,-.02,.52), V3(-.60,-.38,.66), V3(-.90,-.78,.82),
+            V3(-1.32,-1.22,.92), V3(-1.78,-1.62,.98), V3(-2.20,-1.90,1.02), V3(-2.50,-2.06,1.06)
+        },
+        { -- правая нижняя
+            V3(.32,-.02,.52), V3(.60,-.38,.66), V3(.90,-.78,.82),
+            V3(1.32,-1.22,.92), V3(1.78,-1.62,.98), V3(2.20,-1.90,1.02), V3(2.50,-2.06,1.06)
+        },
+    }
+
+    local function addSeg(a,b,width,thick,col,side,i,n)
+        local dir=b-a
+        local len=dir.Magnitude
+        local mid=(a+b)*.5
+        local mat=Enum.Material.Neon
+        local part=cp(model,'TentacleV2',V3(width,thick,len),col,mat,.2)
+        part.CFrame=CFrame.lookAt(mid,b)
+        pieces[#pieces+1]={p=part,a=a,b=b,side=side,i=i,n=n,width=width,thick=thick}
+
+        -- Тонкая кристаллическая ребро для объёма
+        local ridgeW=math.max(.035,width*.22)
+        local ridgeT=math.max(.02,thick*.28)
+        local r=cp(model,'TentacleV2_Ridge',V3(ridgeW,ridgeT,len+.02),
+            crystal,Enum.Material.ForceField,.4)
+        r.CFrame=CFrame.lookAt(mid+V3(0,thick*.28,-.045),b+V3(0,thick*.28,-.045))
+        pieces[#pieces+1]={p=r,a=a,b=b,side=side,i=i,n=n,ridge=true}
+    end
+
+    for side,path in ipairs(paths) do
+        local n=#path
+        for i=1,n-1 do
+            local f=(i-1)/(n-2)
+            local width=.16*(1-f)^.55+.04
+            local thick=.055*(1-f)^.55+.025
+            local col=(i%2==0) and dark or base
+            addSeg(path[i],path[i+1],width,thick,col,side,i,n)
+        end
+        -- Кристаллические сферы на изгибах — мерцают
+        for i=2,n-1 do
+            local f=(i-1)/(n-1)
+            local d=.06*(1-f)+.04
+            local j=cp(model,'TentacleV2_Joint',V3(d,d,d),crystal,Enum.Material.Neon,.15)
+            j.CFrame=CFrame.new(path[i])
+            joints[#joints+1]={p=j,pos=path[i],side=side,i=i}
+            -- Подсветка (PointLight) для габаритного свечения
+            local l=new('PointLight',{Brightness=1.2,Range=3,Color=col,Shadowed=false},j)
+            l.Enabled=true
+            glows[#glows+1]=l
+        end
+    end
+
+    local function update(t,A,sp,air)
+        local sway=1+sp*.65+(air and .35 or 0)
+        local pulse=math.sin(t*3.5)*.08*sway
+        for _,e in ipairs(pieces) do
+            local wave=math.sin(t*2.2+e.i*.55+e.side*.9)*.045*sway
+            local wave2=math.cos(t*1.5+e.i*.42+e.side*.7)*.028*sway
+            local bend=V3(wave*(e.side<=2 and 1 or -.8),wave2,math.sin(t*0.9+e.i*.35)*.012)
+            local a=e.a+bend
+            local b=e.b+bend
+            local mid=(a+b)*.5
+            e.p.CFrame=A.torso*CFrame.lookAt(mid,b)
+            if e.ridge then
+                e.p.CFrame=A.torso*CFrame.lookAt(mid+V3(0,e.thick or .04,-.045),b+V3(0,e.thick or .04,-.045))
+            end
+        end
+        for _,j in ipairs(joints) do
+            local w=math.sin(t*1.9+j.i*.7+j.side)*.018*sway
+            j.p.CFrame=A.torso*CFrame.new(j.pos+V3(w,0,0))
+        end
+        -- Мерцание кристаллов
+        for i=1,#glows do
+            local val=.8+math.sin(t*4.2+i*.68)*.12*sway
+            glows[i].Brightness=math.clamp(val,.3,1.2)
+        end
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+
+
+local function wingsCosmetic()
+    -- Wings переработано: многослойные кристаллические крылья по референсу.
+    local model=new('Model',{Name='VV_Wings'})
+    local palette=PALETTE[S.cosColor] or PALETTE[1]
+    local colr=palette[2]:Lerp(Color3.new(1,1,1),.55)
+    local segments={}
+    local lens={3.8,3.4,3.0,2.6,2.2,1.8}
+    for side=-1,1,2 do
+        for i=1,#lens do
+            local p=cp(model,'Feather',V3(.75,.09,lens[i]),colr,Enum.Material.Neon,.14)
+            p.Size=V3(.8,.1,lens[i])
+            segments[#segments+1]={side=side,i=i,p=p,lens=lens[i]}
+        end
+    end
+    -- Кристаллические сферы на концах крыльев (как на референсе с шляпой)
+    local crystals={}
+    for side=-1,1,2 do
+        local c=cp(model,'WingCrystal',V3(.45,.45,.45),RGB(220,210,255),Enum.Material.Neon,.25)
+        c.Size=V3(.45,.45,.45)
+        crystals[#crystals+1]={side=side,p=c}
+        new('PointLight',{Brightness=1.5,Range=8,Color=colr},c)
+    end
+    local function update(t,A,sp,air)
+        local flap=math.sin(t*(air and 7 or 2.2))*(air and .35 or (.08+.15*sp))
+        for _,f in ipairs(segments) do
+            local a=math.rad(8+f.i*14)+flap
+            local dir=V3(f.side*math.cos(a)*.92,math.sin(a)*.88,.35)
+            local o=(A.torso*CFrame.new(f.side*.42,.88,.5)).Position
+            local d=A.torso:VectorToWorldSpace(dir)
+            f.p.CFrame=CFrame.lookAt(o,o+d)*CFrame.new(0,0,-f.lens/2)
+            f.p.CFrame=f.p.CFrame*CFrame.Angles(0,0,flap*.3*f.side)
+        end
+        local wingY=.88+math.sin(t*1.2)*-.05
+        for i=1,#crystals do
+            local side=crystals[i].side
+            crystals[i].p.CFrame=A.torso*CFrame.new(side*2.4,wingY+.8,-.4)*CFrame.Angles(0,t*.8,0)
+            crystals[i].p.Transparency=.25+math.sin(t*3+i)*.1
+        end
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+
+local function haloCosmetic()
+    local model=new('Model',{Name='VV_Halo'})
+    local col=accent():Lerp(Color3.new(1,1,1),.35)
+    local ps={}
+    local n=18
+    for i=1,n do ps[i]=cp(model,'Halo',V3(.6,.12,.32),col) end
+    local function update(t,A)
+        local c=(A.head*CFrame.new(0,A.hr+.95+math.sin(t*2)*.08,0)).Position
+        local sc=math.clamp(A.hr/1.25,.5,1)
+        for i,p in ipairs(ps) do
+            p.CFrame=CFrame.new(c)*CFrame.Angles(0,i/n*math.pi*2+t*.8,0)*CFrame.new(0,0,1.4*sc)
+        end
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+
+local function segCosmetic(name,defs,th,col,mat)
+    local model=new('Model',{Name='VV_'..name})
+    local items={}
+    for _,sd in ipairs(defs) do
+        for _,sx in ipairs({-1,1}) do
+            local p1=V3(sd[1].X*sx,sd[1].Y,sd[1].Z)
+            local p2=V3(sd[2].X*sx,sd[2].Y,sd[2].Z)
+            local part=cp(model,name,V3(th,th,(p2-p1).Magnitude+th*.6),col,mat,0)
+            items[#items+1]={p=part,cf=CFrame.lookAt((p1+p2)/2,p2)}
+        end
+    end
+    local function update(t,A)
+        local top=A.head*CFrame.new(0,A.hr,0)
+        for _,it in ipairs(items) do it.p.CFrame=top*it.cf end
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+
+local function hornsCosmetic()
+    return segCosmetic('Horns',{
+        {V3(.6,0,0),V3(.85,.6,0)},{V3(.85,.6,0),V3(.9,1.2,.15)},{V3(.9,1.2,.15),V3(.6,1.8,.35)},
+    },.32,RGB(70,10,22),Enum.Material.SmoothPlastic)
+end
+
+local function antlersCosmetic()
+    return segCosmetic('Antlers',{
+        {V3(.5,0,0),V3(.8,.9,-.1)},{V3(.8,.9,-.1),V3(.6,1.7,0)},{V3(.6,1.7,0),V3(.95,2.5,.1)},
+        {V3(.8,.9,-.1),V3(1.5,1.5,-.2)},{V3(.6,1.7,0),V3(.05,2.3,.05)},{V3(.95,2.5,.1),V3(1.4,3.1,.15)},
+    },.18,RGB(225,205,170),Enum.Material.SmoothPlastic)
+end
+
+local function hatCosmetic()
+    local model=new('Model',{Name='VV_Hat'})
+    local layers={}
+    local n=9
+    for i=1,n do
+        local f=(i-1)/(n-1)
+        local dia=4.2*(1-f)+.7
+        local col=(i==1) and RGB(120,15,25) or RGB(195,28,42):Lerp(RGB(150,18,30),(i%2)*.5)
+        local p=cp(model,'Hat',V3(.2,dia,dia),col,Enum.Material.SmoothPlastic,0,Enum.PartType.Cylinder)
+        layers[i]={p=p,h=(i==1) and .14 or .22,dia=dia}
+    end
+    local knob=cp(model,'Hat Knob',V3(.4,.4,.4),RGB(230,40,55),Enum.Material.Neon,0,Enum.PartType.Ball)
+    local function update(t,A)
+        local sc=math.clamp(A.hr/1.25,.45,1)
+        local y=A.hr*.92
+        for i,l in ipairs(layers) do
+            l.p.Size=V3(l.h*sc,l.dia*sc,l.dia*sc)
+            l.p.CFrame=A.head*CFrame.new(0,y,0)*CFrame.Angles(0,0,math.pi/2)
+            y=y+.2*sc
+        end
+        knob.Size=V3(.4*sc,.4*sc,.4*sc)
+        knob.CFrame=A.head*CFrame.new(0,y+.05*sc,0)
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+
+local function tailCosmetic()
+    local model=new('Model',{Name='VV_Tail'})
+    local n=9
+    local ps={}
+    local col=accent():Lerp(Color3.new(1,1,1),.25)
+    for i=1,n do
+        local w=.55*(1-(i-1)/n)+.15
+        ps[i]=cp(model,'Tail',V3(w,w,1),col,Enum.Material.SmoothPlastic,0)
+    end
+    local function update(t,A,sp)
+        local cf=A.torso*CFrame.new(0,-.8,.6)*CFrame.Angles(-.35,0,0)
+        for i,p in ipairs(ps) do
+            p.CFrame=cf*CFrame.new(0,0,.45)
+            cf=cf*CFrame.new(0,0,.9)*CFrame.Angles(-.05,math.sin(t*2.2+i*.6)*.18*(1+sp),0)
+        end
+    end
+    return {model=model,update=update,cleanup=function() model:Destroy() end}
+end
+
+local function auraCosmetic()
+    local model=new('Model',{Name='VV_Aura'})
+    local p=new('Part',{Name='Aura',Size=V3(2.2,3.4,2.2),Transparency=1,Anchored=true,CanCollide=false,CanQuery=false,CanTouch=false},model)
+    new('ParticleEmitter',{
+        Rate=30,Lifetime=NumberRange.new(1,2),Speed=NumberRange.new(.5,2),SpreadAngle=Vector2.new(180,180),
+        Color=ColorSequence.new(accent()),Size=NumberSequence.new(.4,0),Transparency=NumberSequence.new(.3,1),
+        LightEmission=1,Acceleration=V3(0,3,0),
+        Texture='rbxasset://textures/particles/sparkles_main.dds'
+    },p)
+    return {model=model,update=function(t,A) p.CFrame=A.torso end,cleanup=function() model:Destroy() end}
+end
+
+local function dustCosmetic()
+    local model=new('Model',{Name='VV_Dust'})
+    local p=new('Part',{Name='Dust',Size=V3(46,12,46),Transparency=1,Anchored=true,CanCollide=false,CanQuery=false,CanTouch=false},model)
+    local em=new('ParticleEmitter',{
+        Rate=S.dust,Lifetime=NumberRange.new(4,7),Speed=NumberRange.new(.3,1),SpreadAngle=Vector2.new(180,180),
+        Color=ColorSequence.new(RGB(255,150,205)),Size=NumberSequence.new(.22),Transparency=NumberSequence.new(.1,1),
+        LightEmission=1,Acceleration=V3(0,.4,0),
+        Texture='rbxasset://textures/particles/sparkles_main.dds'
+    },p)
+    return {model=model,update=function(t,A)
+        p.CFrame=A.torso*CFrame.new(0,2,0); em.Rate=S.dust
+    end,cleanup=function() model:Destroy() end}
+end
+
+local function hudCosmetic()
+    local f=new('Frame',{
+        Name='VV_HUD',AnchorPoint=Vector2.new(.5,0),Position=UDim2.new(.5,0,0,14),
+        Size=UDim2.fromOffset(240,38),BackgroundColor3=C.field,BorderSizePixel=0,ZIndex=30
+    },gui)
+    corner(f,12); stroke(f,C.line,.5)
+    gradient(f,C.field,C.panelGlass,90)
+    local t=label(f,player.DisplayName..' | 60 FPS',12,true,C.white)
+    t.Size=UDim2.fromScale(1,1); t.TextXAlignment=Enum.TextXAlignment.Center; t.ZIndex=31; t.Font=Enum.Font.Gotham
+    local acc,frames=0,0
+    return {always=true,update=function(_,_,_,_,dt)
+        acc=acc+dt; frames=frames+1
+        if acc>=.4 then
+            t.Text=player.DisplayName..' | '..math.floor(frames/acc+.5)..' FPS'
+            acc=0; frames=0
+        end
+    end,cleanup=function() f:Destroy() end}
+end
+
+local COS_BUILD={
+    Kagune=kaguneCosmetic,TentacleV2=tentacleV2Cosmetic,Wings=wingsCosmetic,Halo=haloCosmetic,Horns=hornsCosmetic,Antlers=antlersCosmetic,
+    Hat=hatCosmetic,Tail=tailCosmetic,Aura=auraCosmetic,Dust=dustCosmetic,HUD=hudCosmetic,
+}
+local COS_LIST={
+    {'Kagune','Кагуне','Красные лезвия из спины'},
+    {'TentacleV2','Щупальца V2','Изящные фиолетовые кристаллы · референс'},
+    {'Wings','Крылья','Многослойные кристальные крылья · референс'},
+    {'Halo','Нимб','Вращающееся кольцо'},
+    {'Horns','Рога','Демонические рога'},
+    {'Antlers','Оленьи рога','Ветвистые антлеры'},
+    {'Hat','Шляпа','Декоративная корона · референс'},
+    {'Tail','Хвост','Пушистый волнистый хвост'},
+    {'Aura','Аура','Светящиеся частицы вокруг'},
+    {'Dust','Пыль','Розовые частицы в воздухе'},
+    {'HUD','Плашка FPS','Имя | FPS сверху экрана'},
+}
+
+local toggleCosmetic
+local function warmUp(c)
+    if updateAnchor() then pcall(c.update,os.clock(),Anchor,0,false,.016,true) end
+    if c.model then c.model.Parent=workspace end
+end
+toggleCosmetic=function(name,on)
+    local cur=Cos[name]
+    if cur then pcall(cur.cleanup); Cos[name]=nil end
+    if on then
+        local bld=COS_BUILD[name]
+        if not bld then return end
+        local ok,res=pcall(bld)
+        if ok and res then
+            Cos[name]=res; S.cosmetics[name]=true; warmUp(res)
+        else
+            warn('[VioletVisuals] cosmetic '..name..': '..tostring(res))
+        end
+    else
+        S.cosmetics[name]=nil
+    end
+end
+local function rebuildActiveCosmetics()
+    for name in pairs(S.cosmetics) do toggleCosmetic(name,true) end
+end
+
+-- ===================== ITEMS =====================
+local itemReg=nil
+local function buildItem(kind)
+    if itemReg then itemReg.model:Destroy(); itemReg=nil end
+    S.item=nil
+    if not kind then return end
+    local model=new('Model',{Name='VV_Item_'..kind})
+    local parts={}
+    local function p(name,size,col,offset,mat)
+        local part=block(model,name,size,col,mat)
+        parts[#parts+1]={p=part,offset=offset}
+        return part
+    end
+    local tilt=CFrame.Angles(math.rad(-35),0,0)
+    if kind=='Sword' then
+        p('Grip',V3(.18,.7,.18),RGB(80,50,30),CFrame.new(0,0,0))
+        p('Guard',V3(.9,.12,.25),RGB(190,170,60),CFrame.new(0,.4,0))
+        p('Blade',V3(.14,3.2,.1),RGB(220,225,235),CFrame.new(0,2.0,0),Enum.Material.Metal)
+        p('Tip',V3(.15,.4,.11),RGB(220,225,235),CFrame.new(0,3.75,0),Enum.Material.Metal)
+    elseif kind=='Staff' then
+        p('Pole',V3(.16,4.5,.16),RGB(90,60,35),CFrame.new(0,1.2,0))
+        p('Orb',V3(.55,.55,.55),RGB(150,110,255),CFrame.new(0,3.7,0),Enum.Material.Neon)
+        p('Orb2',V3(.35,.35,.35),RGB(255,255,255),CFrame.new(0,3.7,0),Enum.Material.Neon)
+    elseif kind=='Lantern' then
+        p('Body',V3(.6,.9,.6),RGB(40,35,50),CFrame.new(0,-.3,0))
+        local g=p('Glow',V3(.4,.6,.4),RGB(255,200,90),CFrame.new(0,-.3,0),Enum.Material.Neon)
+        p('Top',V3(.7,.1,.7),RGB(60,55,75),CFrame.new(0,.2,0))
+        p('Handle',V3(.1,.5,.1),RGB(60,55,75),CFrame.new(0,.5,0))
+        new('PointLight',{Brightness=2,Range=15,Color=RGB(255,200,90)},g)
+        tilt=CFrame.new()
+    elseif kind=='Wand' then
+        p('Stick',V3(.08,1.6,.08),RGB(40,30,20),CFrame.new(0,.3,0))
+        p('Star',V3(.55,.55,.2),RGB(255,220,90),CFrame.new(0,1.3,0),Enum.Material.Neon)
+    elseif kind=='Pistol' then
+        p('Grip',V3(.16,.55,.2),RGB(30,30,35),CFrame.new(0,-.15,0))
+        p('Slide',V3(.2,.25,1.1),RGB(55,55,65),CFrame.new(0,.2,-.4),Enum.Material.Metal)
+        p('Barrel',V3(.14,.14,.35),RGB(20,20,25),CFrame.new(0,.22,-1.05),Enum.Material.Metal)
+        tilt=CFrame.new()
+    end
+    for _,d in ipairs(parts) do d.p.Transparency=1 end
+    model.Parent=workspace
+    itemReg={model=model,parts=parts,tilt=tilt}
+    S.item=kind
+end
+local function updateItem(A)
+    if not itemReg or not A.rightArm then return end
+    local cf=A.rightArm*itemReg.tilt
+    for _,d in ipairs(itemReg.parts) do
+        d.p.Transparency=0
+        d.p.CFrame=cf*d.offset
+    end
+end
+
+-- ===================== UPDATE LOOP =====================
+local warned={}
+track(RunService.RenderStepped:Connect(function(dt)
+    if morph.step then pcall(morph.step) end
+    local ok=updateAnchor()
+    local sp,air=0,false
+    local ch=player.Character
+    local hum=ch and ch:FindFirstChildOfClass('Humanoid')
+    local root=ch and ch:FindFirstChild('HumanoidRootPart')
+    if root then
+        local v=root.AssemblyLinearVelocity
+        sp=math.clamp(Vector3.new(v.X,0,v.Z).Magnitude/14,0,1)
+    end
+    if hum then
+        local st=hum:GetState()
+        air=(st==Enum.HumanoidStateType.Freefall or st==Enum.HumanoidStateType.Jumping)
+    end
+    local t=os.clock()
+    for name,c in pairs(Cos) do
+        if ok or c.always then
+            local okc,err=pcall(c.update,t,Anchor,sp,air,dt)
+            if not okc and not warned[name] then warned[name]=true; warn('[VioletVisuals] '..name..': '..tostring(err)) end
+        end
+    end
+    if ok then updateItem(Anchor) end
+end))
+
+-- ===================== UI TABS =====================
+local currentTab='Characters'
+local tabButtons={}
+local skyExpanded=false
+
+local function clearColumns()
+    for _,o in ipairs(columns:GetChildren()) do
+        if o:IsA('GuiObject') then o:Destroy() end
+    end
+end
+
+local function charactersTab(a,b,c)
+    local cols={a,b,c}
+    for i,kind in ipairs(MORPH_ORDER) do
+        local f=card(cols[((i-1)%3)+1],kind,150)
+        local d=label(f,MORPH_DESC[kind],12,false,C.muted); d.Size=UDim2.new(1,-36,0,34); d.Position=UDim2.fromOffset(18,44)
+        local active=(morph.kind==kind)
+        action(f,active and '◉ АКТИВНО' or ('СТАТЬ '..string.upper(kind)),94,function()
+            buildMorph(kind); build()
+        end,active and RGB(70,50,120) or nil)
+    end
+    local f=card(c,'Сброс',130)
+    note(f,'Вернуть обычного персонажа',46)
+    action(f,'ВЕРНУТЬ ЧЕЛОВЕКА',74,function() buildMorph(nil); build() end)
+end
+
+local function cosmeticsTab(a,b,c)
+    local cols={a,b,c}
+    for i,e in ipairs(COS_LIST) do
+        local f=card(cols[((i-1)%3)+1],e[2],92)
+        switch(f,0,13,S.cosmetics[e[1]]==true,function(v) toggleCosmetic(e[1],v) end)
+        note(f,e[3],52,30)
+    end
+    local k=card(c,'Настройки кагуне',350)
+    slider(k,'Количество лезвий',58,1,8,S.kn,function(v)
+        S.kn=v; debounce('kn',function() if S.cosmetics.Kagune then toggleCosmetic('Kagune',true) end end,.35)
+    end)
+    slider(k,'Длина',120,50,200,S.kLen,function(v) S.kLen=v end)
+    slider(k,'Скорость',182,10,150,S.kSpd,function(v) S.kSpd=v end)
+    dropdown(k,'Цвет косметики',PALNAMES,244,function(_,n)
+        S.cosColor=n; rebuildActiveCosmetics()
+    end,S.cosColor)
+    dropdown(k,'Цвет щупалец V2',PALNAMES,280,function(_,n)
+        S.cosColor=n; rebuildActiveCosmetics()
+    end,S.cosColor)
+    local d=card(c,'Пыль',130)
+    slider(d,'Плотность',58,1,60,S.dust,function(v) S.dust=v end)
+end
+
+local function itemsTab(a,b,c)
+    local p=card(a,'Оружие и предметы',380)
+    note(p,'Предмет крепится к правой руке',46)
+    local y=76
+    for _,k in ipairs({'Sword','Staff','Lantern','Wand','Pistol'}) do
+        local on=(S.item==k)
+        action(p,(on and '◉ ' or '')..k,y,function() buildItem(k); build() end,on and RGB(70,50,120) or nil)
+        y=y+48
+    end
+    action(p,'Убрать предмет',y+6,function() buildItem(nil); build() end)
+end
+
+local function shadersTab(a,b,c)
+    local p=card(a,'Bloom',255)
+    switch(p,0,13,S.bloom,function(v) S.bloom=v; applyShaders() end)
+    slider(p,'Сила',58,0,100,S.bloomI,function(v) S.bloomI=v; applyShaders() end)
+    slider(p,'Размер',120,0,56,S.bloomSize,function(v) S.bloomSize=v; applyShaders() end)
+    slider(p,'Порог',182,0,100,S.bloomThr,function(v) S.bloomThr=v; applyShaders() end)
+
+    local p2=card(a,'Color Correction',330)
+    switch(p2,0,13,S.color,function(v) S.color=v; applyShaders() end)
+    slider(p2,'Насыщенность',58,0,100,S.sat,function(v) S.sat=v; applyShaders() end)
+    slider(p2,'Контраст',120,0,100,S.con,function(v) S.con=v; applyShaders() end)
+    slider(p2,'Яркость',182,0,100,S.bri,function(v) S.bri=v; applyShaders() end)
+    dropdown(p2,'Оттенок',TINTNAMES,244,function(_,n) S.tintIdx=n; applyShaders() end,S.tintIdx)
+
+    local q=card(b,'Sun Rays',195)
+    switch(q,0,13,S.rays,function(v) S.rays=v; applyShaders() end)
+    slider(q,'Сила',58,0,100,S.raysI,function(v) S.raysI=v; applyShaders() end)
+    slider(q,'Разброс',120,0,100,S.raysSpread,function(v) S.raysSpread=v; applyShaders() end)
+
+    local q2=card(b,'Depth of Field',260)
+    switch(q2,0,13,S.dof,function(v) S.dof=v; applyShaders() end)
+    slider(q2,'Фокус',58,0,100,S.dofF,function(v) S.dofF=v; applyShaders() end)
+    slider(q2,'Резкая зона',120,0,100,S.dofR,function(v) S.dofR=v; applyShaders() end)
+    slider(q2,'Сила размытия',182,0,100,S.dofFar,function(v) S.dofFar=v; applyShaders() end)
+
+    local r=card(b,'Blur',135)
+    switch(r,0,13,S.blur,function(v) S.blur=v; applyShaders() end)
+    slider(r,'Размер',58,0,100,S.blurS,function(v) S.blurS=v; applyShaders() end)
+
+    local s=card(c,'Пресеты',135)
+    dropdown(s,'Стиль',presetNames,50,applyPreset,S.style)
+
+    local l=card(c,'Rich Lighting',330)
+    switch(l,0,13,S.rich,function(v) S.rich=v; applyWorld() end)
+    slider(l,'Отражения',58,0,100,S.refl,function(v) S.refl=v; if S.rich then applyLighting() end end)
+    slider(l,'Окружающий свет',120,0,100,S.diff,function(v) S.diff=v; if S.rich then applyLighting() end end)
+    slider(l,'Экспозиция',182,0,100,S.expo,function(v) S.expo=v; if S.rich then applyLighting() end end)
+    note(l,'Мягкие тени и усиленные отражения',250,34)
+end
+
+local function worldTab(a,b,c)
+    -- custom sky
+    local p=card(a,'Custom Sky',skyExpanded and 770 or 67)
+    switch(p,0,13,S.skyEnabled,function(v) S.skyEnabled=v; applyWorld() end)
+    local hit=new('TextButton',{Size=UDim2.new(1,-94,0,49),Position=UDim2.fromOffset(7,4),Text='',BackgroundTransparency=1},p)
+    hit.MouseButton1Click:Connect(function() skyExpanded=not skyExpanded; build('World') end)
+    local arrow=label(p,skyExpanded and '▲' or '▼',17,true,C.muted)
+    arrow.Size=UDim2.fromOffset(20,25); arrow.Position=UDim2.new(1,-94,0,14)
+    if skyExpanded then
+        line(p,'Пресет неба — нажми',60)
+        for i,name in ipairs(skyOrder) do
+            local sel=S.skyChoice==name
+            local bb=new('TextButton',{
+                Size=UDim2.new(1,-36,0,32),Position=UDim2.fromOffset(18,88+(i-1)*36),
+                BackgroundColor3=sel and RGB(60,48,90) or C.field,
+                Text=(sel and '●  ' or '○  ')..name,TextXAlignment=Enum.TextXAlignment.Left,
+                TextColor3=sel and C.white or C.muted,Font=Enum.Font.Gotham,TextSize=12,BorderSizePixel=0,AutoButtonColor=false
+            },p)
+            new('UIPadding',{PaddingLeft=UDim.new(0,10)},bb)
+            corner(bb,6)
+            bb.MouseButton1Click:Connect(function()
+                S.skyChoice=name; S.skyEnabled=true; applyWorld(); build('World')
+            end)
+        end
+        slider(p,'Звёзды',494,0,5000,S.skyStars,function(v) S.skyStars=v; if S.skyEnabled or S.skyboxOn then applyWorld() end end)
+        slider(p,'Размер солнца',556,0,60,S.sunSize,function(v) S.sunSize=v; if S.skyEnabled or S.skyboxOn then applyWorld() end end)
+        slider(p,'Размер луны',618,0,60,S.moonSize,function(v) S.moonSize=v; if S.skyEnabled or S.skyboxOn then applyWorld() end end)
+        local moon=action(p,'Небесные тела: '..(S.skyMoon and 'ВКЛ' or 'ВЫКЛ'),684,function() end)
+        moon.MouseButton1Click:Connect(function()
+            S.skyMoon=not S.skyMoon
+            moon.Text='Небесные тела: '..(S.skyMoon and 'ВКЛ' or 'ВЫКЛ')
+            if S.skyEnabled or S.skyboxOn then applyWorld() end
+        end)
+        note(p,'Локально · выкл восстанавливает оригинал',728,30)
+    end
+
+    -- custom skybox
+    local sb=card(a,'Custom Skybox',470)
+    switch(sb,0,13,S.skyboxOn,function(v) S.skyboxOn=v; applyWorld() end)
+    note(sb,'Вставь rbxassetid / число (id картинки)',46)
+    textbox(sb,68,'ID для всех граней',S.skyAll,function(txt) S.skyAll=txt end)
+    action(sb,'ПРИМЕНИТЬ КО ВСЕМ ГРАНЯМ',110,function()
+        for face in pairs(S.skybox) do S.skybox[face]=S.skyAll end
+        S.skyboxOn=true; applyWorld(); build('World')
+    end)
+    local y=160
+    for _,n in ipairs({{'Bk','Зад'},{'Dn','Низ'},{'Ft','Перед'},{'Lf','Лево'},{'Rt','Право'},{'Up','Верх'}}) do
+        textbox(sb,y,n[2]..' ('..n[1]..')',S.skybox[n[1]],function(txt)
+            S.skybox[n[1]]=txt; if S.skyboxOn then applyWorld() end
+        end)
+        y=y+40
+    end
+    action(sb,'СБРОСИТЬ СКАЙБОКС',y+6,function()
+        for face in pairs(S.skybox) do S.skybox[face]='' end
+        S.skyAll=''; S.skyboxOn=false; applyWorld(); build('World')
+    end)
+
+    -- fog
+    local fg=card(b,'Туман',400)
+    switch(fg,0,13,S.fogOn,function(v) S.fogOn=v; applyWorld() end)
+    slider(fg,'Начало',58,0,1000,S.fogStart,function(v) S.fogStart=v; if S.fogOn then applyWorld() end end)
+    slider(fg,'Конец (дальность)',120,50,5000,S.fogEnd,function(v) S.fogEnd=v; if S.fogOn then applyWorld() end end)
+    slider(fg,'Плотность',182,0,100,S.fogDensity,function(v) S.fogDensity=v; if S.fogOn then applyWorld() end end)
+    slider(fg,'Дымка',244,0,100,S.fogHaze,function(v) S.fogHaze=v; if S.fogOn then applyWorld() end end)
+    dropdown(fg,'Цвет тумана',FOGNAMES,306,function(_,n) S.fogColor=n; if S.fogOn then applyWorld() end end,S.fogColor)
+
+    local tm=card(b,'Время суток',140)
+    switch(tm,0,13,S.timeOn,function(v) S.timeOn=v; applyWorld() end)
+    slider(tm,'Часы',58,0,24,S.time,function(v) S.time=v; if S.timeOn then applyWorld() end end)
+
+    local q=card(c,'Ночь',67)
+    switch(q,0,13,S.night,function(v) S.night=v; applyWorld() end)
+    local q2=card(c,'Полная яркость',67)
+    switch(q2,0,13,S.full,function(v) S.full=v; applyWorld() end)
+    local q3=card(c,'Ambient акцент',67)
+    switch(q3,0,13,S.amb,function(v) S.amb=v; applyWorld() end)
+    local r=card(c,'Заметка',150)
+    note(r,'Небо, туман, скайбокс и время работают только у тебя (клиент). Другие игроки их не увидят.',46,70)
+end
+
+local function resetAll()
+    buildMorph(nil)
+    for name in pairs(S.cosmetics) do toggleCosmetic(name,false) end
+    buildItem(nil)
+    S.bloom=false; S.color=false; S.rays=false; S.dof=false; S.blur=false; S.rich=false
+    S.skyEnabled=false; S.skyboxOn=false; S.fogOn=false; S.timeOn=false; S.night=false; S.full=false; S.amb=false
+    applyShaders(); applyWorld(); build()
+end
+
+local function settingsTab(a,b,c)
+    local p=card(a,'Интерфейс',240)
+    note(p,'Violet Visuals v5 · клиентский интерфейс',46,34)
+    action(p,'ЗАКРЫТЬ МЕНЮ',100,function() setOpen(false) end)
+    action(p,'СБРОСИТЬ ВСЁ',148,resetAll,RGB(110,30,50))
+
+    local q=card(b,'Управление',180)
+    note(q,'RightShift — открыть / закрыть',50)
+    note(q,'Перетаскивай шапку, чтобы двигать меню',78,34)
+    note(q,'Вкладки прокручиваются вбок',118)
+
+    local r=card(c,'Темы',160)
+    note(r,'Выбери красоту в твоём стиле',38,48)
+    local dk=dropdown(r,'Цветовая гамма',PALNAMES,70,function(_,n)
+        S.cosColor=n
+        rebuildActiveCosmetics()
+    end,S.cosColor)
+
+    local s=card(c,'О скрипте',180)
+    note(s,'Один Luau-файл, без библиотек',50)
+    note(s,'Всё работает локально',78)
+end
+
+build=function(tab)
+    currentTab=tab or currentTab
+    clearColumns()
+    local a,b,c=column(),column(),column()
+    if currentTab=='Characters' then charactersTab(a,b,c)
+    elseif currentTab=='Cosmetics' then cosmeticsTab(a,b,c)
+    elseif currentTab=='Items' then itemsTab(a,b,c)
+    elseif currentTab=='Shaders' then shadersTab(a,b,c)
+    elseif currentTab=='World' then worldTab(a,b,c)
+    elseif currentTab=='Settings' then settingsTab(a,b,c)
+    end
+end
+
+for _,name in ipairs({'Characters','Cosmetics','Items','Shaders','World','Settings'}) do
+    local t=new('TextButton',{
+        Size=UDim2.fromOffset(96,39),BackgroundTransparency=1,Text=name,
+        TextSize=12,Font=Enum.Font.GothamBold,TextColor3=C.muted,BorderSizePixel=0,AutoButtonColor=false
+    },tabs)
+    -- Glass tab hover effect
+    local tabGlass=new('Frame',{Size=UDim2.new(1,0,1,0),BackgroundTransparency=.85,BorderSizePixel=0,ZIndex=0},t)
+    corner(tabGlass,8)
+    tabButtons[name]=t
+    t.MouseEnter:Connect(function() if currentTab~=name then t.TextColor3=C.accent end end)
+    t.MouseLeave:Connect(function() if currentTab~=name then t.TextColor3=C.muted end end)
+    t.MouseButton1Click:Connect(function()
+        for n,v in pairs(tabButtons) do v.TextColor3=(n==name) and C.accent or C.muted end
+        build(name)
+    end)
+end
+tabButtons.Characters.TextColor3=C.accent
+build('Characters')
+
+-- open/close + drag
+toggleOpen.MouseButton1Click:Connect(function() setOpen(true) end)
+track(UIS.InputBegan:Connect(function(i,gp)
+    if not gp and i.KeyCode==Enum.KeyCode.RightShift then setOpen(not main.Visible) end
+end))
+local dragging,dstart,origin
+header.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then
+        dragging=i; dstart=i.Position; origin=main.Position
+    end
+end)
+track(UIS.InputChanged:Connect(function(i)
+    if dragging and (i==dragging or
+        (dragging.UserInputType==Enum.UserInputType.MouseButton1 and i.UserInputType==Enum.UserInputType.MouseMovement)) then
+        local d=i.Position-dstart
+        main.Position=UDim2.new(origin.X.Scale,origin.X.Offset+d.X,origin.Y.Scale,origin.Y.Offset+d.Y)
+    end
+end))
+track(UIS.InputEnded:Connect(function(i)
+    if dragging and (i==dragging or i.UserInputType==Enum.UserInputType.MouseButton1) then dragging=nil end
+end))
+
+-- global cleanup
+_G.VV_Cleanup=function()
+    for _,cn in ipairs(conns) do pcall(function() cn:Disconnect() end) end
+    conns={}
+    pcall(function() buildMorph(nil) end)
+    for name in pairs(Cos) do pcall(function() toggleCosmetic(name,false) end) end
+    pcall(function() buildItem(nil) end)
+    for _,e in ipairs({bloom,colorFx,rays,dof,blur}) do pcall(function() e:Destroy() end) end
+    S.skyEnabled=false; S.skyboxOn=false; S.fogOn=false; S.timeOn=false
+    S.night=false; S.full=false; S.amb=false; S.rich=false
+    pcall(applyWorld)
+    pcall(function() gui:Destroy() end)
+end
+
+setOpen(true)
